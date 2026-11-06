@@ -18,7 +18,7 @@ from openpyxl.worksheet.worksheet import Worksheet
 from PIL import Image as PILImage
 from PIL import ImageDraw
 from reportlab.lib import colors
-from reportlab.lib.enums import TA_CENTER
+from reportlab.lib.enums import TA_CENTER, TA_LEFT
 from reportlab.lib.pagesizes import A4, landscape
 from reportlab.lib.styles import ParagraphStyle
 from reportlab.lib.units import cm
@@ -665,6 +665,7 @@ def _tabelas_matriz_impacto_sintetico(res: ResultadoSimulacao) -> tuple[Table, P
         decimo = sum(m["decimo_terceiro"] for m in meses_k) * vagas
         ferias = sum(m["ferias"] for m in meses_k) * vagas
         inss = sum(m["inss"] for m in meses_k) * vagas
+        inss_mensal = (inss / len(meses_k)) if meses_k else 0.0
         sub_prov = rbm + decimo + ferias
         sub_enc = inss
         total = sub_prov + sub_enc
@@ -673,14 +674,27 @@ def _tabelas_matriz_impacto_sintetico(res: ResultadoSimulacao) -> tuple[Table, P
             "decimo": decimo,
             "ferias": ferias,
             "subtotal_proventos": sub_prov,
+            "inss_mensal": inss_mensal,
             "inss": inss,
             "subtotal_encargos": sub_enc,
             "total_geral": total,
         }
 
     aliq_pct = int(round(float(md.get("aliquota_patronal", 0.20)) * 100))
-    rotulo_encargo = f"Encargo Patronal ({aliq_pct}%) - Anual"
-    rotulo_linha8 = f"Total Geral Contratação {qtd_str} {cargo} {ch}"
+    rotulo_encargo_mensal = f"Encargo Patronal ({aliq_pct}%) - Mensal"
+    rotulo_encargo_anual = f"Encargo Patronal ({aliq_pct}%) - Anual"
+
+    rotulo_vagas = "vaga" if vagas == 1 else "vagas"
+    rotulo_linha9_texto = f"Total Geral da Contratação ({qtd_str} {rotulo_vagas})"
+    estilo_linha9 = ParagraphStyle(
+        "sintetico_linha9",
+        fontName="Helvetica-Bold",
+        fontSize=9,
+        leading=11,
+        alignment=TA_LEFT,
+        textColor=colors.black,
+    )
+    celula_total = Paragraph(rotulo_linha9_texto, estilo_linha9)
 
     dados2 = [
         cabecalho2,
@@ -688,10 +702,11 @@ def _tabelas_matriz_impacto_sintetico(res: ResultadoSimulacao) -> tuple[Table, P
         ["13° Salário Variável", formatar_brl(totais_por_ano[1]["decimo"]), formatar_brl(totais_por_ano[2]["decimo"]), formatar_brl(totais_por_ano[3]["decimo"])],
         ["Férias (1/3)", formatar_brl(totais_por_ano[1]["ferias"]), formatar_brl(totais_por_ano[2]["ferias"]), formatar_brl(totais_por_ano[3]["ferias"])],
         ["SUBTOTAL DE PROVENTOS (ANUAL)", formatar_brl(totais_por_ano[1]["subtotal_proventos"]), formatar_brl(totais_por_ano[2]["subtotal_proventos"]), formatar_brl(totais_por_ano[3]["subtotal_proventos"])],
-        [rotulo_encargo, formatar_brl(totais_por_ano[1]["inss"]), formatar_brl(totais_por_ano[2]["inss"]), formatar_brl(totais_por_ano[3]["inss"])],
+        [rotulo_encargo_mensal, formatar_brl(totais_por_ano[1]["inss_mensal"]), formatar_brl(totais_por_ano[2]["inss_mensal"]), formatar_brl(totais_por_ano[3]["inss_mensal"])],
+        [rotulo_encargo_anual, formatar_brl(totais_por_ano[1]["inss"]), formatar_brl(totais_por_ano[2]["inss"]), formatar_brl(totais_por_ano[3]["inss"])],
         ["SUBTOTAL DE ENCARGOS (ANUAL)", formatar_brl(totais_por_ano[1]["subtotal_encargos"]), formatar_brl(totais_por_ano[2]["subtotal_encargos"]), formatar_brl(totais_por_ano[3]["subtotal_encargos"])],
         ["TOTAL ANUAL GERAL", formatar_brl(totais_por_ano[1]["total_geral"]), formatar_brl(totais_por_ano[2]["total_geral"]), formatar_brl(totais_por_ano[3]["total_geral"])],
-        [rotulo_linha8, formatar_brl(totais_por_ano[1]["total_geral"]), formatar_brl(totais_por_ano[2]["total_geral"]), formatar_brl(totais_por_ano[3]["total_geral"])],
+        [celula_total, formatar_brl(totais_por_ano[1]["total_geral"]), formatar_brl(totais_por_ano[2]["total_geral"]), formatar_brl(totais_por_ano[3]["total_geral"])],
     ]
 
     tabela2 = Table(dados2, colWidths=[7.5 * cm, 3.5 * cm, 3.5 * cm, 3.5 * cm])
@@ -711,14 +726,14 @@ def _tabelas_matriz_impacto_sintetico(res: ResultadoSimulacao) -> tuple[Table, P
                 # Linha 4: SUBTOTAL DE PROVENTOS (ANUAL)
                 ("FONTNAME", (0, 4), (-1, 4), "Helvetica-Bold"),
                 ("BACKGROUND", (0, 4), (-1, 4), colors.HexColor("#E7E6E6")),
-                # Linha 6: SUBTOTAL DE ENCARGOS (ANUAL)
-                ("FONTNAME", (0, 6), (-1, 6), "Helvetica-Bold"),
-                ("BACKGROUND", (0, 6), (-1, 6), colors.HexColor("#E7E6E6")),
-                # Linha 7: TOTAL ANUAL GERAL
+                # Linha 7: SUBTOTAL DE ENCARGOS (ANUAL)
                 ("FONTNAME", (0, 7), (-1, 7), "Helvetica-Bold"),
                 ("BACKGROUND", (0, 7), (-1, 7), colors.HexColor("#E7E6E6")),
-                # Linha 8: Total Geral Contratação...
+                # Linha 8: TOTAL ANUAL GERAL
                 ("FONTNAME", (0, 8), (-1, 8), "Helvetica-Bold"),
+                ("BACKGROUND", (0, 8), (-1, 8), colors.HexColor("#E7E6E6")),
+                # Linha 9: Total Geral da Contratação...
+                ("FONTNAME", (0, 9), (-1, 9), "Helvetica-Bold"),
             ]
         )
     )

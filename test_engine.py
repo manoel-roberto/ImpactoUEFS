@@ -664,6 +664,14 @@ def test_relatorio_pdf_sintetico_layout_uefs() -> None:
     # Verifica metadados no PDF sintético
     assert b"Demonstrativo Sint" in pdf_sintetico or b"Impacto" in pdf_sintetico
 
+    # Verifica linhas da matriz sintética (Tabela 2)
+    tabela2, _, _ = relatorios._tabelas_matriz_impacto_sintetico(res)
+    assert "Mensal" in tabela2._cellvalues[5][0]
+    assert "Anual" in tabela2._cellvalues[6][0]
+    assert tabela2._cellvalues[7][0] == "SUBTOTAL DE ENCARGOS (ANUAL)"
+    assert tabela2._cellvalues[8][0] == "TOTAL ANUAL GERAL"
+    assert "Total Geral da Contratação (02 vagas)" in tabela2._cellvalues[9][0].text
+
     # 2. Geração detalhada (tipo="detalhado")
     pdf_detalhado = relatorios.gerar_pdf(res, resumo, tipo="detalhado")
     assert pdf_detalhado[:4] == b"%PDF"

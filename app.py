@@ -143,16 +143,18 @@ def pagina_simulacao() -> None:
         st.stop()
 
     st.subheader("Cargo")
-    categoria_previa = st.session_state.get("categoria", engine.listar_categorias()[0])
-    vinculo_previo = st.session_state.get("vinculo", engine.listar_vinculos(categoria_previa)[0])
     col1, col2 = st.columns(2)
     with col1:
         categoria = _selectbox_dependente("Categoria", engine.listar_categorias(), "categoria")
-        cargo_nome = _selectbox_dependente(
-            "Cargo", engine.listar_cargos(categoria, vinculo_previo), "cargo"
-        )
     with col2:
         vinculo = _selectbox_dependente("Vínculo", engine.listar_vinculos(categoria), "vinculo")
+
+    col3, col4 = st.columns(2)
+    with col3:
+        cargo_nome = _selectbox_dependente(
+            "Cargo", engine.listar_cargos(categoria, vinculo), "cargo"
+        )
+    with col4:
         ch = _selectbox_dependente(
             "Carga Horária", engine.listar_chs(categoria, vinculo, cargo_nome), "ch"
         )
@@ -161,9 +163,9 @@ def pagina_simulacao() -> None:
         st.error("Combinação de cargo inválida.")
         st.stop()
 
-    col3, col4 = st.columns(2)
-    col3.text_input("Nível/Classe", value=cargo.nivel_classe, disabled=True)
-    col4.text_input("Incentivo/Adicional", value=cargo.incentivo_descricao, disabled=True)
+    col_nivel, col_inc = st.columns(2)
+    col_nivel.text_input("Nível/Classe", value=cargo.nivel_classe, disabled=True)
+    col_inc.text_input("Incentivo/Adicional", value=cargo.incentivo_descricao, disabled=True)
     if cargo.is_jornalista:
         if len(cargo.chs) == 1:
             chs_texto = f"carga horária única de {cargo.chs[0]}"
@@ -734,17 +736,21 @@ def pagina_importacao() -> None:
                     engine.listar_categorias(),
                     key="man_categoria",
                 )
+            with col_m2:
                 vinculo_manual = st.selectbox(
                     "Vínculo",
                     engine.listar_vinculos(cat_manual),
                     key="man_vinculo",
                 )
-            with col_m2:
+
+            col_m3, col_m4 = st.columns(2)
+            with col_m3:
                 cargo_manual = st.selectbox(
                     "Cargo",
                     engine.listar_cargos(cat_manual, vinculo_manual),
                     key="man_cargo",
                 )
+            with col_m4:
                 ch_opcoes = engine.listar_chs(cat_manual, vinculo_manual, cargo_manual)
                 ch_manual = st.selectbox(
                     "Carga Horária",
