@@ -1,0 +1,30 @@
+# Ambientes Virtuais
+.venv/
+venv/
+env/
+ENV/
+
+# Python Cache e Bytecode
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Pytest e Cobertura
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Arquivos de Backup e Compactados
+*.zip
+*.tar.gz
+
+# IDEs e Editores
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Sistema Operacional
+.DS_Store
+Thumbs.db
