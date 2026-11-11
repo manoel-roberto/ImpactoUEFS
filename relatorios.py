@@ -18,7 +18,7 @@ from openpyxl.worksheet.worksheet import Worksheet
 from PIL import Image as PILImage
 from PIL import ImageDraw
 from reportlab.lib import colors
-from reportlab.lib.enums import TA_CENTER, TA_LEFT
+from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
 from reportlab.lib.pagesizes import A4, landscape
 from reportlab.lib.styles import ParagraphStyle
 from reportlab.lib.units import cm
@@ -57,6 +57,10 @@ COLUNAS_MONETARIAS_MENSAL: tuple[str, ...] = (
     "Custo Total (por vaga)",
 )
 OBS_EXTRAPOLADO = "Valor mantido da última vigência"
+MESES_EXTENSO: tuple[str, ...] = (
+    "Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho",
+    "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro",
+)
 
 _AZUL_ESCURO = colors.HexColor("#1F3864")
 _CINZA_CLARO = colors.HexColor("#E7E6E6")
@@ -166,10 +170,10 @@ def _parametros(res: ResultadoSimulacao, incluir_totais: bool) -> list[tuple[str
     itens: list[tuple[str, Any, bool]] = [
         ("Categoria", md["categoria"], False),
         ("Vínculo", md["vinculo"], False),
-        ("Cargo", md["cargo"], False),
+        ("Cargo Professor" if res.is_docente else "Cargo", md["cargo"], False),
         ("Nível/Classe", md["nivel_classe_descricao"], False),
         ("Carga Horária", md["ch"], False),
-        ("Incentivo/Adicional", md["incentivo_descricao"], False),
+        ("Incentivo" if res.is_docente else "Gratificação", md["incentivo_descricao"], False),
         ("Quantidade de vagas", md["quantidade_vagas"], False),
         ("Ingresso (MM/AAAA)", competencia(md["mes_ingresso"], md["ano_ingresso"]), False),
         ("Período projetado", periodo_projetado(res), False),
@@ -188,6 +192,10 @@ def _parametros(res: ResultadoSimulacao, incluir_totais: bool) -> list[tuple[str
         itens.append(("Custo médio mensal por vaga", md["custo_medio_mensal"], True))
     if md.get("observacao"):
         itens.append(("Observações do Usuário", md["observacao"], False))
+    if md.get("setor_descricao"):
+        itens.append(("Setor responsável", md["setor_descricao"], False))
+    elif md.get("setor"):
+        itens.append(("Setor responsável", md["setor"], False))
     itens.append(("Gerado em", f"{_data_geracao(res):%d/%m/%Y %H:%M}", False))
     return itens
 
@@ -220,17 +228,32 @@ def _criar_canvas(rodape: str) -> type[rl_canvas.Canvas]:
         def _desenhar_rodape(self, total: int) -> None:
             largura, _ = self._pagesize
             self.saveState()
-            self.setFont("Helvetica", 8)
+            self.setFont("Helvetica", 7.5)
             self.setFillColor(colors.grey)
             self.setStrokeColor(colors.lightgrey)
-            self.line(2 * cm, 1.6 * cm, largura - 2 * cm, 1.6 * cm)
-            self.drawString(2 * cm, 1.2 * cm, rodape)
+            self.line(1.5 * cm, 1.5 * cm, largura - 1.5 * cm, 1.5 * cm)
+            self.drawString(1.5 * cm, 1.1 * cm, rodape)
             self.drawRightString(
-                largura - 2 * cm, 1.2 * cm, f"Página {self._pageNumber} de {total}"
+                largura - 1.5 * cm, 1.1 * cm, f"Página {self._pageNumber} de {total}"
             )
             self.restoreState()
 
     return CanvasNumerado
+
+
+def _formatar_rodape(res: ResultadoSimulacao, prefixo: str = "") -> str:
+    """Gera o texto do rodapé incluindo setor responsável e data/hora."""
+    md = res.metadados
+    gerado = _data_geracao(res)
+    setor_sigla = str(md.get("setor") or engine.SETOR_PADRAO)
+    setor_nome = md.get("setor_nome") or engine.SETORES.get(setor_sigla, "")
+    setor_info = f"{setor_sigla} - {setor_nome}" if setor_nome else setor_sigla
+    partes: list[str] = []
+    if prefixo:
+        partes.append(prefixo)
+    partes.append(f"Setor: {setor_info}")
+    partes.append(f"gerado em {gerado:%d/%m/%Y %H:%M}")
+    return " – ".join(partes)
 
 
 def _estilos() -> dict[str, ParagraphStyle]:
@@ -611,18 +634,116 @@ def _tabela_logos_sintetico() -> Table | None:
     return tabela
 
 
+def _tabela_parametros_sintetico(res: ResultadoSimulacao) -> Table:
+    """Tabela de Parâmetros de Cálculo no relatório sintético."""
+    md = res.metadados
+    categoria = str(md.get("categoria", ""))
+    vinculo = str(md.get("vinculo", ""))
+    cargo = str(md.get("cargo", ""))
+    nivel = str(md.get("nivel_classe_descricao", ""))
+    ch = str(md.get("ch", ""))
+    vagas = int(md.get("quantidade_vagas", 1))
+    vagas_str = f"{vagas:02d} {'vaga' if vagas == 1 else 'vagas'}"
+
+    mes_ingresso = int(md.get("mes_ingresso", 1))
+    ano_ingresso = int(md.get("ano_ingresso", 2027))
+    meses_nomes = (
+        "Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho",
+        "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro",
+    )
+    nome_mes = meses_nomes[mes_ingresso - 1]
+    texto_contratacao = f"* Início em 01 de {nome_mes} de {ano_ingresso}"
+
+    rotulo_cargo = "Cargo Professor:" if res.is_docente else "Cargo:"
+
+    estilo_titulo = ParagraphStyle(
+        "sint_param_titulo",
+        fontName="Helvetica-Bold",
+        fontSize=8,
+        leading=10,
+        alignment=TA_LEFT,
+        textColor=colors.black,
+    )
+    estilo_lbl = ParagraphStyle(
+        "sint_param_lbl",
+        fontName="Helvetica-Bold",
+        fontSize=7,
+        leading=8.5,
+        textColor=colors.HexColor("#222222"),
+    )
+    estilo_val = ParagraphStyle(
+        "sint_param_val",
+        fontName="Helvetica",
+        fontSize=7,
+        leading=8.5,
+        textColor=colors.black,
+    )
+    estilo_nota = ParagraphStyle(
+        "sint_param_nota",
+        fontName="Helvetica-Bold",
+        fontSize=8.5,
+        leading=11,
+        alignment=TA_LEFT,
+        textColor=colors.HexColor("#1B365D"),
+    )
+
+    dados = [
+        [Paragraph("<b>Parâmetros de cálculo</b>", estilo_titulo), "", "", ""],
+        [
+            Paragraph("<b>Categoria:</b>", estilo_lbl), Paragraph(escape(categoria), estilo_val),
+            Paragraph("<b>Vínculo:</b>", estilo_lbl), Paragraph(escape(vinculo), estilo_val),
+        ],
+        [
+            Paragraph(f"<b>{rotulo_cargo}</b>", estilo_lbl), Paragraph(escape(cargo), estilo_val),
+            Paragraph("<b>Nível/Classe:</b>", estilo_lbl), Paragraph(escape(nivel), estilo_val),
+        ],
+        [
+            Paragraph("<b>Carga Horária:</b>", estilo_lbl), Paragraph(escape(ch), estilo_val),
+            Paragraph("<b>Quantidade de vaga(s):</b>", estilo_lbl), Paragraph(escape(vagas_str), estilo_val),
+        ],
+        [
+            Paragraph(f"<b>{texto_contratacao}</b>", estilo_nota), "", "", "",
+        ],
+    ]
+
+    tabela = Table(dados, colWidths=[3.2 * cm, 5.8 * cm, 3.5 * cm, 5.5 * cm])
+    tabela.setStyle(
+        TableStyle(
+            [
+                ("SPAN", (0, 0), (3, 0)),
+                ("BACKGROUND", (0, 0), (3, 0), colors.HexColor("#E7E6E6")),
+                ("BACKGROUND", (0, 1), (0, 3), colors.HexColor("#F7F7F7")),
+                ("BACKGROUND", (2, 1), (2, 3), colors.HexColor("#F7F7F7")),
+                ("SPAN", (0, 4), (3, 4)),
+                ("BACKGROUND", (0, 4), (3, 4), colors.HexColor("#EBF3FA")),
+                ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#B0B0B0")),
+                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                ("TOPPADDING", (0, 0), (-1, -1), 1.5),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 1.5),
+                ("TOPPADDING", (0, 4), (3, 4), 3),
+                ("BOTTOMPADDING", (0, 4), (3, 4), 3),
+                ("LEFTPADDING", (0, 0), (-1, -1), 4),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 4),
+            ]
+        )
+    )
+    return tabela
+
+
 def _tabela_remuneracao_base_sintetico(res: ResultadoSimulacao) -> Table:
     """Tabela 1: Remuneração Base (Topo) no primeiro mês de ingresso."""
     md = res.metadados
     mes1 = res.meses[0] if res.meses else {}
     cargo_nome = str(md.get("cargo", ""))
     vencimento = formatar_brl(mes1.get("vencimento_basico", 0))
-    incentivos = formatar_brl(mes1.get("gratificacao", 0) + mes1.get("incentivo", 0))
+    adicional_valor = formatar_brl(mes1.get("gratificacao", 0) + mes1.get("incentivo", 0))
     total = formatar_brl(mes1.get("rbm", 0))
 
+    col_composicao = "INCENTIVOS" if res.is_docente else "GRATIFICAÇÃO"
+
     dados = [
-        ["CARGO", "REMUNERAÇÃO", "INCENTIVOS", "TOTAL"],
-        [cargo_nome, vencimento, incentivos, total],
+        ["CARGO", "REMUNERAÇÃO", col_composicao, "TOTAL"],
+        [cargo_nome, vencimento, adicional_valor, total],
     ]
     tabela = Table(dados, colWidths=[6.0 * cm, 4.0 * cm, 4.0 * cm, 4.0 * cm])
     tabela.setStyle(
@@ -644,8 +765,8 @@ def _tabela_remuneracao_base_sintetico(res: ResultadoSimulacao) -> Table:
     return tabela
 
 
-def _tabelas_matriz_impacto_sintetico(res: ResultadoSimulacao) -> tuple[Table, Paragraph | None, Table]:
-    """Tabela 2 (Matriz Principal), Nota do Ano 1 e Tabela 3 (Quadro Resumo)."""
+def _tabelas_matriz_impacto_sintetico(res: ResultadoSimulacao) -> Table:
+    """Tabela 2 (Matriz Principal de Impacto) do relatório sintético."""
     md = res.metadados
     ano_ingresso = int(md["ano_ingresso"])
     ano1, ano2, ano3 = ano_ingresso, ano_ingresso + 1, ano_ingresso + 2
@@ -656,60 +777,94 @@ def _tabelas_matriz_impacto_sintetico(res: ResultadoSimulacao) -> tuple[Table, P
     eh_ano1_parcial = int(md.get("mes_ingresso", 1)) > 1
 
     col_ano1 = f"{ano1}*" if eh_ano1_parcial else str(ano1)
-    cabecalho2 = ["Acréscimo", col_ano1, str(ano2), str(ano3)]
+    cabecalho2 = ["Composição", col_ano1, str(ano2), str(ano3), "Total (3 Anos)"]
 
-    totais_por_ano: dict[int, dict[str, float]] = {}
+    aliq = float(md.get("aliquota_patronal", 0.20))
+    aliq_pct = int(round(aliq * 100))
+
+    # Cálculos unitários (por 1 única vaga) para cada ano de projeção
+    tot_u: dict[int, dict[str, float]] = {}
     for k in (1, 2, 3):
         meses_k = [m for m in res.meses if m["ano_projecao"] == k]
-        rbm = sum(m["rbm"] for m in meses_k) * vagas
-        decimo = sum(m["decimo_terceiro"] for m in meses_k) * vagas
-        ferias = sum(m["ferias"] for m in meses_k) * vagas
-        inss = sum(m["inss"] for m in meses_k) * vagas
-        inss_mensal = (inss / len(meses_k)) if meses_k else 0.0
-        sub_prov = rbm + decimo + ferias
-        sub_enc = inss
-        total = sub_prov + sub_enc
-        totais_por_ano[k] = {
-            "rbm": rbm,
-            "decimo": decimo,
-            "ferias": ferias,
-            "subtotal_proventos": sub_prov,
-            "inss_mensal": inss_mensal,
-            "inss": inss,
-            "subtotal_encargos": sub_enc,
-            "total_geral": total,
+        num_m = len(meses_k) if meses_k else 1
+
+        rbm_u = sum(m["rbm"] for m in meses_k)
+        decimo_u = sum(m["decimo_terceiro"] for m in meses_k)
+        ferias_u = sum(m["ferias"] for m in meses_k)
+        sub_prov_u = rbm_u + decimo_u + ferias_u
+
+        enc_rbm_m = (rbm_u / num_m) * aliq
+        enc_decimo_m = (decimo_u / num_m) * aliq
+        enc_ferias_m = 0.0
+        enc_total_m = enc_rbm_m + enc_decimo_m
+
+        enc_total_anual = sum(m["inss"] for m in meses_k)
+        sub_enc_u = enc_total_anual
+
+        custo_servidor = sub_prov_u + sub_enc_u
+
+        tot_u[k] = {
+            "rbm": rbm_u,
+            "decimo": decimo_u,
+            "ferias": ferias_u,
+            "sub_prov": sub_prov_u,
+            "enc_rbm_m": enc_rbm_m,
+            "enc_decimo_m": enc_decimo_m,
+            "enc_ferias_m": enc_ferias_m,
+            "enc_total_m": enc_total_m,
+            "enc_total_anual": enc_total_anual,
+            "sub_enc": sub_enc_u,
+            "custo_servidor": custo_servidor,
         }
 
-    aliq_pct = int(round(float(md.get("aliquota_patronal", 0.20)) * 100))
-    rotulo_encargo_mensal = f"Encargo Patronal ({aliq_pct}%) - Mensal"
-    rotulo_encargo_anual = f"Encargo Patronal ({aliq_pct}%) - Anual"
+    # Total dos 3 anos (Triênio) para 1 vaga
+    trienio_u = {
+        "rbm": sum(tot_u[k]["rbm"] for k in (1, 2, 3)),
+        "decimo": sum(tot_u[k]["decimo"] for k in (1, 2, 3)),
+        "ferias": sum(tot_u[k]["ferias"] for k in (1, 2, 3)),
+        "sub_prov": sum(tot_u[k]["sub_prov"] for k in (1, 2, 3)),
+        "enc_total_anual": sum(tot_u[k]["enc_total_anual"] for k in (1, 2, 3)),
+        "sub_enc": sum(tot_u[k]["sub_enc"] for k in (1, 2, 3)),
+        "custo_servidor": sum(tot_u[k]["custo_servidor"] for k in (1, 2, 3)),
+    }
+
+    # Valores totais multiplicados pela quantidade de vagas
+    tot_v = {k: tot_u[k]["custo_servidor"] * vagas for k in (1, 2, 3)}
+    trienio_v = trienio_u["custo_servidor"] * vagas
 
     rotulo_vagas = "vaga" if vagas == 1 else "vagas"
-    rotulo_linha9_texto = f"Total Geral da Contratação ({qtd_str} {rotulo_vagas})"
-    estilo_linha9 = ParagraphStyle(
-        "sintetico_linha9",
-        fontName="Helvetica-Bold",
-        fontSize=9,
-        leading=11,
+    qtd_fmt = f"{vagas:02d}"
+
+    estilo_linha_rbm = ParagraphStyle(
+        "sint_linha_rbm",
+        fontName="Helvetica",
+        fontSize=8,
+        leading=9.5,
         alignment=TA_LEFT,
         textColor=colors.black,
     )
-    celula_total = Paragraph(rotulo_linha9_texto, estilo_linha9)
+    celula_rbm = Paragraph(
+        "Anual (Rendimento Básico Mensal - RBM - 1 vaga)",
+        estilo_linha_rbm,
+    )
 
     dados2 = [
         cabecalho2,
-        ["Anual", formatar_brl(totais_por_ano[1]["rbm"]), formatar_brl(totais_por_ano[2]["rbm"]), formatar_brl(totais_por_ano[3]["rbm"])],
-        ["13° Salário Variável", formatar_brl(totais_por_ano[1]["decimo"]), formatar_brl(totais_por_ano[2]["decimo"]), formatar_brl(totais_por_ano[3]["decimo"])],
-        ["Férias (1/3)", formatar_brl(totais_por_ano[1]["ferias"]), formatar_brl(totais_por_ano[2]["ferias"]), formatar_brl(totais_por_ano[3]["ferias"])],
-        ["SUBTOTAL DE PROVENTOS (ANUAL)", formatar_brl(totais_por_ano[1]["subtotal_proventos"]), formatar_brl(totais_por_ano[2]["subtotal_proventos"]), formatar_brl(totais_por_ano[3]["subtotal_proventos"])],
-        [rotulo_encargo_mensal, formatar_brl(totais_por_ano[1]["inss_mensal"]), formatar_brl(totais_por_ano[2]["inss_mensal"]), formatar_brl(totais_por_ano[3]["inss_mensal"])],
-        [rotulo_encargo_anual, formatar_brl(totais_por_ano[1]["inss"]), formatar_brl(totais_por_ano[2]["inss"]), formatar_brl(totais_por_ano[3]["inss"])],
-        ["SUBTOTAL DE ENCARGOS (ANUAL)", formatar_brl(totais_por_ano[1]["subtotal_encargos"]), formatar_brl(totais_por_ano[2]["subtotal_encargos"]), formatar_brl(totais_por_ano[3]["subtotal_encargos"])],
-        ["TOTAL ANUAL GERAL", formatar_brl(totais_por_ano[1]["total_geral"]), formatar_brl(totais_por_ano[2]["total_geral"]), formatar_brl(totais_por_ano[3]["total_geral"])],
-        [celula_total, formatar_brl(totais_por_ano[1]["total_geral"]), formatar_brl(totais_por_ano[2]["total_geral"]), formatar_brl(totais_por_ano[3]["total_geral"])],
+        [celula_rbm, formatar_brl(tot_u[1]["rbm"]), formatar_brl(tot_u[2]["rbm"]), formatar_brl(tot_u[3]["rbm"]), formatar_brl(trienio_u["rbm"])],
+        ["13° Salário Variável", formatar_brl(tot_u[1]["decimo"]), formatar_brl(tot_u[2]["decimo"]), formatar_brl(tot_u[3]["decimo"]), formatar_brl(trienio_u["decimo"])],
+        ["Férias (1/3)", formatar_brl(tot_u[1]["ferias"]), formatar_brl(tot_u[2]["ferias"]), formatar_brl(tot_u[3]["ferias"]), formatar_brl(trienio_u["ferias"])],
+        ["SUBTOTAL DE PROVENTOS (1 VAGA)", formatar_brl(tot_u[1]["sub_prov"]), formatar_brl(tot_u[2]["sub_prov"]), formatar_brl(tot_u[3]["sub_prov"]), formatar_brl(trienio_u["sub_prov"])],
+        [f"Encargo Patronal ({aliq_pct}%) s/ RBM (Mensal)", formatar_brl(tot_u[1]["enc_rbm_m"]), formatar_brl(tot_u[2]["enc_rbm_m"]), formatar_brl(tot_u[3]["enc_rbm_m"]), "-"],
+        [f"Encargo Patronal ({aliq_pct}%) s/ 13º Salário (Mensal)", formatar_brl(tot_u[1]["enc_decimo_m"]), formatar_brl(tot_u[2]["enc_decimo_m"]), formatar_brl(tot_u[3]["enc_decimo_m"]), "-"],
+        [f"Encargo Patronal ({aliq_pct}%) - Total Mensal", formatar_brl(tot_u[1]["enc_total_m"]), formatar_brl(tot_u[2]["enc_total_m"]), formatar_brl(tot_u[3]["enc_total_m"]), "-"],
+        [f"Encargo Patronal ({aliq_pct}%) - Total Anual", formatar_brl(tot_u[1]["enc_total_anual"]), formatar_brl(tot_u[2]["enc_total_anual"]), formatar_brl(tot_u[3]["enc_total_anual"]), formatar_brl(trienio_u["enc_total_anual"])],
+        ["SUBTOTAL DE ENCARGOS (1 VAGA)", formatar_brl(tot_u[1]["sub_enc"]), formatar_brl(tot_u[2]["sub_enc"]), formatar_brl(tot_u[3]["sub_enc"]), formatar_brl(trienio_u["sub_enc"])],
+        ["CUSTO TOTAL DE 1 VAGA (ANUAL)", formatar_brl(tot_u[1]["custo_servidor"]), formatar_brl(tot_u[2]["custo_servidor"]), formatar_brl(tot_u[3]["custo_servidor"]), formatar_brl(trienio_u["custo_servidor"])],
+        ["Quantidade de Vaga(s)", f"× {vagas}", f"× {vagas}", f"× {vagas}", f"× {vagas}"],
+        [f"TOTAL GERAL ({qtd_fmt} {rotulo_vagas.upper()})", formatar_brl(tot_v[1]), formatar_brl(tot_v[2]), formatar_brl(tot_v[3]), formatar_brl(trienio_v)],
     ]
 
-    tabela2 = Table(dados2, colWidths=[7.5 * cm, 3.5 * cm, 3.5 * cm, 3.5 * cm])
+    tabela2 = Table(dados2, colWidths=[6.8 * cm, 2.8 * cm, 2.8 * cm, 2.8 * cm, 2.8 * cm])
     tabela2.setStyle(
         TableStyle(
             [
@@ -718,68 +873,78 @@ def _tabelas_matriz_impacto_sintetico(res: ResultadoSimulacao) -> tuple[Table, P
                 ("ALIGN", (0, 0), (-1, 0), "CENTER"),
                 ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
                 ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#E7E6E6")),
-                ("FONTSIZE", (0, 0), (-1, -1), 9),
+                ("FONTSIZE", (0, 0), (-1, -1), 8),
                 ("ALIGN", (0, 1), (0, -1), "LEFT"),
                 ("ALIGN", (1, 1), (-1, -1), "RIGHT"),
-                ("TOPPADDING", (0, 0), (-1, -1), 2.5),
-                ("BOTTOMPADDING", (0, 0), (-1, -1), 2.5),
-                # Linha 4: SUBTOTAL DE PROVENTOS (ANUAL)
+                ("ALIGN", (1, 11), (-1, 11), "CENTER"),
+                ("TOPPADDING", (0, 0), (-1, -1), 2),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
+                # Linha 4: SUBTOTAL DE PROVENTOS (1 VAGA)
                 ("FONTNAME", (0, 4), (-1, 4), "Helvetica-Bold"),
                 ("BACKGROUND", (0, 4), (-1, 4), colors.HexColor("#E7E6E6")),
-                # Linha 7: SUBTOTAL DE ENCARGOS (ANUAL)
+                # Linha 7: Encargo Patronal - Total Mensal
                 ("FONTNAME", (0, 7), (-1, 7), "Helvetica-Bold"),
-                ("BACKGROUND", (0, 7), (-1, 7), colors.HexColor("#E7E6E6")),
-                # Linha 8: TOTAL ANUAL GERAL
-                ("FONTNAME", (0, 8), (-1, 8), "Helvetica-Bold"),
-                ("BACKGROUND", (0, 8), (-1, 8), colors.HexColor("#E7E6E6")),
-                # Linha 9: Total Geral da Contratação...
+                # Linha 9: SUBTOTAL DE ENCARGOS (1 VAGA)
                 ("FONTNAME", (0, 9), (-1, 9), "Helvetica-Bold"),
+                ("BACKGROUND", (0, 9), (-1, 9), colors.HexColor("#E7E6E6")),
+                # Linha 10: CUSTO TOTAL DE 1 VAGA (ANUAL)
+                ("FONTNAME", (0, 10), (-1, 10), "Helvetica-Bold"),
+                ("BACKGROUND", (0, 10), (-1, 10), colors.HexColor("#E7E6E6")),
+                # Linha 11: Quantidade de Vagas
+                ("FONTNAME", (0, 11), (-1, 11), "Helvetica-Bold"),
+                # Linha 12: TOTAL GERAL
+                ("FONTNAME", (0, 12), (-1, 12), "Helvetica-Bold"),
             ]
         )
     )
 
-    nota_ano1 = None
-    if eh_ano1_parcial:
-        meses_nomes = (
-            "Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho",
-            "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro",
-        )
-        nome_mes = meses_nomes[int(md["mes_ingresso"]) - 1]
-        nota_ano1 = Paragraph(
-            f"<i>* contratações em 01 de {nome_mes} de {ano1}</i>",
-            ParagraphStyle(
-                "nota_ano1_sintetico",
-                fontName="Helvetica",
-                fontSize=8,
-                leading=10,
-                textColor=colors.HexColor("#333333"),
-            ),
-        )
+    return tabela2
 
-    dados3 = [
-        ["TOTAIS", col_ano1, str(ano2), str(ano3)],
-        ["Total Geral da Contratação", formatar_brl(totais_por_ano[1]["total_geral"]), formatar_brl(totais_por_ano[2]["total_geral"]), formatar_brl(totais_por_ano[3]["total_geral"])],
-    ]
-    tabela3 = Table(dados3, colWidths=[7.5 * cm, 3.5 * cm, 3.5 * cm, 3.5 * cm])
-    tabela3.setStyle(
+
+def _bloco_especificacao_patronal_sintetico(res: ResultadoSimulacao) -> Table:
+    """Quadro explicativo com a especificação legal e base de cálculo do encargo patronal."""
+    md = res.metadados
+    aliq_pct = int(round(float(md.get("aliquota_patronal", 0.20)) * 100))
+    vinculo = str(md.get("vinculo", ""))
+    eh_efetivo = vinculo == "Efetivo"
+
+    if eh_efetivo:
+        regime = "RPPS / Estado da Bahia (Lei Estadual nº 11.357/2009 e Lei nº 14.520/2022)"
+    else:
+        regime = "RGPS / INSS (Art. 40, § 13 da CF/88 c/c Lei Federal nº 8.212/1991, art. 22, I)"
+
+    estilo_bloco = ParagraphStyle(
+        "sintetico_bloco_patronal",
+        fontName="Helvetica",
+        fontSize=7.8,
+        leading=10.5,
+        textColor=colors.HexColor("#222222"),
+    )
+
+    texto = (
+        f"<b>Especificação da Base de Incidência dos Encargos Patronais ({aliq_pct}% – {regime}):</b><br/>"
+        "O encargo patronal incide mensal e anualmente sobre as seguintes parcelas remuneratórias:<br/>"
+        "• <b>Rendimento Básico Mensal (RBM):</b> Vencimento básico somado às gratificações e incentivos do cargo.<br/>"
+        "• <b>13º Salário:</b> Gratificação natalina proporcional aos meses de efetivo exercício no ano.<br/>"
+        "• <b>1/3 de Férias:</b> Não há incidência de encargo patronal sobre o adicional de férias.<br/>"
+        f"<i>Fórmula de Incidência: Encargo Patronal = {aliq_pct}% × (RBM + 13º Salário).</i>"
+    )
+
+    p = Paragraph(texto, estilo_bloco)
+    tabela = Table([[p]], colWidths=[18.0 * cm])
+    tabela.setStyle(
         TableStyle(
             [
-                ("GRID", (0, 0), (-1, -1), 0.5, colors.black),
-                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-                ("ALIGN", (0, 0), (-1, 0), "CENTER"),
-                ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-                ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#E7E6E6")),
-                ("FONTSIZE", (0, 0), (-1, -1), 9),
-                ("ALIGN", (0, 1), (0, 1), "LEFT"),
-                ("ALIGN", (1, 1), (-1, 1), "RIGHT"),
-                ("FONTNAME", (0, 1), (-1, 1), "Helvetica-Bold"),
-                ("TOPPADDING", (0, 0), (-1, -1), 3),
-                ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+                ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#B0B0B0")),
+                ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#F9F9F9")),
+                ("TOPPADDING", (0, 0), (-1, -1), 4),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+                ("LEFTPADDING", (0, 0), (-1, -1), 6),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 6),
             ]
         )
     )
-
-    return tabela2, nota_ano1, tabela3
+    return tabela
 
 
 def _gerar_pdf_sintetico(res: ResultadoSimulacao, resumo: pd.DataFrame) -> bytes:
@@ -834,32 +999,21 @@ def _gerar_pdf_sintetico(res: ResultadoSimulacao, resumo: pd.DataFrame) -> bytes
 
     historia.append(
         Paragraph(
-            f"IMPACTO ORÇAMENTÁRIO DE GASTOS DE PESSOAL PARA SELEÇÃO EM {ano1}, {ano2} E {ano3}",
+            f"IMPACTO ORÇAMENTÁRIO {ano1}, {ano2} E {ano3}",
             estilo_titulo,
         )
     )
-    historia.append(Spacer(1, 2))
-    historia.append(
-        Paragraph("* Valores de referência baseados na planilha importada.", estilo_subtitulo)
-    )
-    historia.append(Spacer(1, 8))
-
-    historia.append(Paragraph(_descricao_cargo_sintetico(md), estilo_desc_cargo))
     historia.append(Spacer(1, 4))
+    historia.append(_tabela_parametros_sintetico(res))
+    historia.append(Spacer(1, 8))
 
     historia.append(_tabela_remuneracao_base_sintetico(res))
     historia.append(Spacer(1, 10))
 
-    tabela2, nota_ano1, tabela3 = _tabelas_matriz_impacto_sintetico(res)
+    tabela2 = _tabelas_matriz_impacto_sintetico(res)
     historia.append(tabela2)
-    if nota_ano1 is not None:
-        historia.append(Spacer(1, 3))
-        historia.append(nota_ano1)
-    historia.append(Spacer(1, 10))
 
-    historia.append(tabela3)
-
-    rodape = f"ImpactoUEFS – Relatório Sintético – gerado em {gerado:%d/%m/%Y %H:%M}"
+    rodape = _formatar_rodape(res)
     documento.build(historia, canvasmaker=_criar_canvas(rodape))
     return buffer.getvalue()
 
@@ -881,7 +1035,7 @@ def _gerar_pdf_detalhado(res: ResultadoSimulacao, resumo: pd.DataFrame) -> bytes
     )
     historia: list[Any] = [
         _cabecalho(estilos),
-        Paragraph("Parâmetros da simulação", estilos["secao"]),
+        Paragraph("Parâmetros de cálculo", estilos["secao"]),
         _tabela_parametros(res, estilos),
         Paragraph("Resumo por ano", estilos["secao"]),
         _tabela_resumo(resumo, estilos),
@@ -905,18 +1059,236 @@ def _gerar_pdf_detalhado(res: ResultadoSimulacao, resumo: pd.DataFrame) -> bytes
         Paragraph("Nota metodológica e embasamento legal", estilos["secao"]),
         Paragraph(
             f"<b>Composição e Fórmulas:</b> RBM = vencimento básico + {ROTULO_GRATIFICACAO} + incentivo "
-            "(titulação para docentes; incentivo para Motorista). 13º salário = RBM / 12; adicional de férias = (RBM / 3) / 12. "
+            "(titulação para docentes; incentivo para Motorista). 13º salário = RBM / 12; adicional de férias = (RBM / 3) / 12 (a partir do 2º ano). "
             "Benefícios indenizatórios (auxílio-alimentação, transporte etc.) estão excluídos.<br/>"
-            "<b>Encargo Patronal sobre Remuneração e Férias Gozadas (STF Tema 985 / RE 1.072.485):</b><br/>"
-            "• <b>Servidor Efetivo (28% - RPPS):</b> Lei Estadual nº 11.357/2009 (art. 68), alterada pela Lei nº 14.520/2022. "
-            "Natureza remuneratória das férias gozadas (art. 92 da Lei Estadual nº 6.677/1994) e incidência sobre o terço constitucional.<br/>"
-            "• <b>Servidor Temporário / REDA (20% - RGPS/INSS):</b> Art. 40, § 13 da CF/88 c/c Lei Federal nº 8.212/1991 (art. 22, I) "
-            "e Decreto nº 3.048/1999 (art. 214, § 4º), com incidência sobre os dias de descanso usufruídos e o terço constitucional.",
+            "<b>Base de Incidência dos Encargos Patronais:</b> O encargo patronal incide mensal e anualmente sobre as "
+            "parcelas remuneratórias: <b>Rendimento Básico Mensal (RBM) + 13º Salário</b> "
+            "(Fórmula: Encargo = Alíquota × [RBM + 13º Salário]). Não há incidência de encargo patronal sobre o adicional de férias.<br/>"
+            "• <b>Servidor Efetivo (28% - RPPS):</b> Lei Estadual nº 11.357/2009 (art. 68), alterada pela Lei nº 14.520/2022.<br/>"
+            "• <b>Servidor Temporário / REDA (20% - RGPS/INSS):</b> Art. 40, § 13 da CF/88 c/c Lei Federal nº 8.212/1991 (art. 22, I).",
             estilos["nota"],
         ),
     ]
-    rodape = f"ImpactoUEFS – gerado em {gerado:%d/%m/%Y %H:%M}"
+    rodape = _formatar_rodape(res)
     documento.build(historia, canvasmaker=_criar_canvas(rodape))
+    return buffer.getvalue()
+
+
+def _gerar_pdf_memoria_calculo(res: ResultadoSimulacao, resumo: pd.DataFrame) -> bytes:
+    """Gera o relatório oficial de Memória de Cálculo discriminando como cada valor é apurado."""
+    md = res.metadados
+    gerado = _data_geracao(res)
+    ano_ingresso = int(md["ano_ingresso"])
+    mes_ingresso = int(md["mes_ingresso"])
+    ano1, ano2, ano3 = ano_ingresso, ano_ingresso + 1, ano_ingresso + 2
+    vagas = int(md.get("quantidade_vagas", 1))
+    aliq = float(md.get("aliquota_patronal", 0.20))
+    aliq_pct = int(round(aliq * 100))
+    vinculo = str(md.get("vinculo", ""))
+    eh_efetivo = (vinculo == "Efetivo")
+    regime_desc = "RPPS / Estado da Bahia (28%)" if eh_efetivo else "RGPS / INSS (20%)"
+
+    mes1 = res.meses[0] if res.meses else {}
+    venc_m = mes1.get("vencimento_basico", 0.0)
+    grat_m = mes1.get("gratificacao", 0.0)
+    inc_m = mes1.get("incentivo", 0.0)
+    rbm_m = mes1.get("rbm", 0.0)
+    decimo_m = mes1.get("decimo_terceiro", 0.0)
+    ferias_m = mes1.get("ferias", 0.0)
+    sub_prov_m = rbm_m + decimo_m + ferias_m
+
+    enc_rbm_m = rbm_m * aliq
+    enc_decimo_m = decimo_m * aliq
+    enc_ferias_m = 0.0
+    enc_total_m = mes1.get("inss", 0.0)
+    custo_total_m = mes1.get("custo_total", 0.0)
+
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(
+        buffer,
+        pagesize=A4,
+        leftMargin=1.5 * cm,
+        rightMargin=1.5 * cm,
+        topMargin=1.2 * cm,
+        bottomMargin=1.2 * cm,
+        title="Memória de Cálculo – Impacto Orçamentário UEFS",
+        author="Universidade Estadual de Feira de Santana – UEFS",
+    )
+
+    st_titulo = ParagraphStyle("mem_titulo", fontName="Helvetica-Bold", fontSize=11, leading=13, alignment=TA_CENTER)
+    st_sub = ParagraphStyle("mem_sub", fontName="Helvetica-Oblique", fontSize=7.5, leading=9.5, alignment=TA_CENTER, textColor=colors.HexColor("#333333"))
+    st_sec = ParagraphStyle("mem_sec", fontName="Helvetica-Bold", fontSize=8.5, leading=11, textColor=colors.HexColor("#1B365D"))
+
+    st_th = ParagraphStyle("mem_th", fontName="Helvetica-Bold", fontSize=7, leading=8.5, alignment=TA_CENTER)
+    st_td = ParagraphStyle("mem_td", fontName="Helvetica", fontSize=7, leading=8.5, alignment=TA_LEFT)
+    st_td_b = ParagraphStyle("mem_td_b", fontName="Helvetica-Bold", fontSize=7, leading=8.5, alignment=TA_LEFT)
+    st_td_r = ParagraphStyle("mem_td_r", fontName="Helvetica", fontSize=7, leading=8.5, alignment=TA_RIGHT)
+    st_td_rb = ParagraphStyle("mem_td_rb", fontName="Helvetica-Bold", fontSize=7, leading=8.5, alignment=TA_RIGHT)
+    st_td_c = ParagraphStyle("mem_td_c", fontName="Helvetica", fontSize=7, leading=8.5, alignment=TA_CENTER)
+    st_p = ParagraphStyle("mem_p", fontName="Helvetica", fontSize=7.5, leading=9.5)
+    st_pb = ParagraphStyle("mem_pb", fontName="Helvetica-Bold", fontSize=7.5, leading=9.5)
+
+    historia: list[Any] = []
+
+    logos = _tabela_logos_sintetico()
+    if logos is not None:
+        historia.append(logos)
+        historia.append(Spacer(1, 3))
+
+    historia.append(Paragraph("MEMÓRIA DE CÁLCULO DISCRIMINADA DO IMPACTO ORÇAMENTÁRIO", st_titulo))
+    historia.append(Spacer(1, 1))
+    historia.append(Paragraph(f"Detalhamento Metodológico, Fórmulas e Composição de Custos – Projeção Trienal {ano1}, {ano2} e {ano3}", st_sub))
+    historia.append(Spacer(1, 5))
+
+    # 1. Parâmetros
+    historia.append(Paragraph("1. PARÂMETROS DE CÁLCULO", st_sec))
+    historia.append(Spacer(1, 2))
+    eh_parcial = mes_ingresso > 1
+    mes_nome = MESES_EXTENSO[mes_ingresso - 1]
+    cargo_txt = escape(str(md.get("cargo", "")))
+    categ_txt = escape(str(md.get("categoria", "")))
+    ch_txt = escape(str(md.get("ch", "")))
+    nivel_txt = escape(str(md.get("nivel_classe", "")))
+    inc_txt = escape(str(md.get("incentivo_descricao", "—")))
+    vagas_txt = f"{vagas:02d} {'vaga' if vagas == 1 else 'vagas'}"
+
+    rotulo_inc_mem = "Incentivo:" if res.is_docente else "Gratificação:"
+    dados_param = [
+        [Paragraph("<b>Cargo:</b>", st_p), Paragraph(f"{cargo_txt} ({categ_txt} - {vinculo})", st_p),
+         Paragraph("<b>Carga Horária / Nível:</b>", st_p), Paragraph(f"{ch_txt} | Nível: {nivel_txt}", st_p)],
+        [Paragraph("<b>Ingresso:</b>", st_p), Paragraph(f"01 de {mes_nome} de {ano1} ({13 - mes_ingresso} meses no Ano 1)", st_p),
+         Paragraph("<b>Vagas Solicitadas:</b>", st_p), Paragraph(vagas_txt, st_pb)],
+        [Paragraph("<b>Previdência / Alíquota:</b>", st_p), Paragraph(f"{regime_desc}", st_p),
+         Paragraph(f"<b>{rotulo_inc_mem}</b>", st_p), Paragraph(f"{inc_txt}", st_p)],
+    ]
+    tab_param = Table(dados_param, colWidths=[3.2 * cm, 5.8 * cm, 3.8 * cm, 5.2 * cm])
+    tab_param.setStyle(TableStyle([
+        ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#B0B0B0")),
+        ("BACKGROUND", (0, 0), (0, -1), colors.HexColor("#F2F2F2")),
+        ("BACKGROUND", (2, 0), (2, -1), colors.HexColor("#F2F2F2")),
+        ("TOPPADDING", (0, 0), (-1, -1), 1.5),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 1.5),
+    ]))
+    historia.append(tab_param)
+    historia.append(Spacer(1, 5))
+
+    # 2. Memória Mensal Proventos
+    historia.append(Paragraph("2. MEMÓRIA DE CÁLCULO MENSAL DE 1 SERVIDOR (PROVENTOS)", st_sec))
+    historia.append(Spacer(1, 2))
+    rubrica_comp = "Incentivo" if res.is_docente else "Gratificação"
+    regra_comp = "Percentual referente à titulação" if res.is_docente else "Percentual inerente ao cargo/função"
+    formula_rbm = "Vencimento + Incentivo" if res.is_docente else "Vencimento + Gratificação"
+
+    dados_prov = [
+        [Paragraph("Rubrica / Parcela", st_th), Paragraph("Regra de Apuração / Base de Cálculo", st_th), Paragraph("Fórmula Matemática", st_th), Paragraph("Valor Mensal (1 Serv.)", st_th)],
+        [Paragraph("Vencimento Básico", st_td), Paragraph("Tabela Salarial oficial vigente na data de ingresso", st_td), Paragraph("Vencimento fixado em lei", st_td), Paragraph(formatar_brl(venc_m), st_td_r)],
+        [Paragraph(rubrica_comp, st_td), Paragraph(regra_comp, st_td), Paragraph("Aplicado sobre o vencimento básico", st_td), Paragraph(formatar_brl(grat_m + inc_m), st_td_r)],
+        [Paragraph("Rendimento Básico Mensal (RBM)", st_td_b), Paragraph("Base remuneratória mensal total do servidor", st_td), Paragraph(formula_rbm, st_td), Paragraph(formatar_brl(rbm_m), st_td_rb)],
+        [Paragraph("13º Salário Proporcional", st_td), Paragraph("Provisão mensal de gratificação natalina (1/12)", st_td), Paragraph("RBM ÷ 12", st_td), Paragraph(formatar_brl(decimo_m), st_td_r)],
+        [Paragraph("Adicional de Férias (1/3)", st_td), Paragraph("Provisão mensal do terço constitucional (1/36)", st_td), Paragraph("(RBM ÷ 3) ÷ 12 = RBM ÷ 36", st_td), Paragraph(formatar_brl(ferias_m), st_td_r)],
+        [Paragraph("SUBTOTAL DE PROVENTOS (MENSAL)", st_td_b), Paragraph("Total de direitos remuneratórios mensais por vaga", st_td_b), Paragraph("RBM + 13º Salário + 1/3 de Férias", st_td_b), Paragraph(formatar_brl(sub_prov_m), st_td_rb)],
+    ]
+    tab_prov = Table(dados_prov, colWidths=[4.8 * cm, 5.8 * cm, 4.4 * cm, 3.0 * cm])
+    tab_prov.setStyle(TableStyle([
+        ("GRID", (0, 0), (-1, -1), 0.5, colors.black),
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#E7E6E6")),
+        ("TOPPADDING", (0, 0), (-1, -1), 1.5),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 1.5),
+        ("BACKGROUND", (0, 3), (-1, 3), colors.HexColor("#F7F7F7")),
+        ("BACKGROUND", (0, 6), (-1, 6), colors.HexColor("#E7E6E6")),
+    ]))
+    historia.append(tab_prov)
+    historia.append(Spacer(1, 5))
+
+    # 3. Memória Mensal Encargos
+    historia.append(Paragraph(f"3. MEMÓRIA DE CÁLCULO DOS ENCARGOS PATRONAIS ({aliq_pct}% – {regime_desc})", st_sec))
+    historia.append(Spacer(1, 2))
+    dados_enc = [
+        [Paragraph("Parcela Incidente", st_th), Paragraph("Base de Cálculo", st_th), Paragraph("Alíq.", st_th), Paragraph("Encargo (1 Serv.)", st_th), Paragraph("Fundamentação Legal", st_th)],
+        [Paragraph("Sobre Rendimento (RBM)", st_td), Paragraph(formatar_brl(rbm_m), st_td_r), Paragraph(f"{aliq_pct}%", st_td_c), Paragraph(formatar_brl(enc_rbm_m), st_td_r), Paragraph("CF/88 art. 40 §13 / Lei 8.212/91 ou Lei 11.357/09", st_td)],
+        [Paragraph("Sobre 13º Salário", st_td), Paragraph(formatar_brl(decimo_m), st_td_r), Paragraph(f"{aliq_pct}%", st_td_c), Paragraph(formatar_brl(enc_decimo_m), st_td_r), Paragraph("Incidência previdenciária s/ gratificação natalina", st_td)],
+        [Paragraph("Sobre 1/3 de Férias", st_td), Paragraph(formatar_brl(ferias_m), st_td_r), Paragraph("0%", st_td_c), Paragraph(formatar_brl(0.0), st_td_r), Paragraph("Não incide encargo patronal s/ 1/3 de férias", st_td)],
+        [Paragraph("SUBTOTAL ENCARGOS PATRONAIS", st_td_b), Paragraph(formatar_brl(rbm_m + decimo_m), st_td_rb), Paragraph(f"{aliq_pct}%", st_td_c), Paragraph(formatar_brl(enc_total_m), st_td_rb), Paragraph(f"Soma das cotas patronais ({aliq_pct}% s/ RBM + 13º)", st_td_b)],
+        [Paragraph("CUSTO MENSAL DE 1 SERVIDOR", st_td_b), Paragraph("—", st_td_c), Paragraph("—", st_td_c), Paragraph(formatar_brl(custo_total_m), st_td_rb), Paragraph("Proventos Mensais + Encargos Patronais Mensais", st_td_b)],
+    ]
+    tab_enc = Table(dados_enc, colWidths=[4.2 * cm, 2.5 * cm, 1.3 * cm, 2.8 * cm, 7.2 * cm])
+    tab_enc.setStyle(TableStyle([
+        ("GRID", (0, 0), (-1, -1), 0.5, colors.black),
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#E7E6E6")),
+        ("TOPPADDING", (0, 0), (-1, -1), 1.5),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 1.5),
+        ("BACKGROUND", (0, 4), (-1, 4), colors.HexColor("#E7E6E6")),
+        ("BACKGROUND", (0, 5), (-1, 5), colors.HexColor("#D9E1F2")),
+    ]))
+    historia.append(tab_enc)
+    historia.append(Spacer(1, 5))
+
+    # 4. Projeção Trienal
+    historia.append(Paragraph("4. PROJEÇÃO TRIENAL E MULTIPLICAÇÃO PELA QUANTIDADE DE VAGAS", st_sec))
+    historia.append(Spacer(1, 2))
+
+    tot_u: dict[int, dict[str, Any]] = {}
+    for k in (1, 2, 3):
+        meses_k = [m for m in res.meses if m["ano_projecao"] == k]
+        num_m = len(meses_k) if meses_k else 1
+        prov_k = sum(m["rbm"] + m["decimo_terceiro"] + m["ferias"] for m in meses_k)
+        enc_k = sum(m["inss"] for m in meses_k)
+        tot_u[k] = {
+            "meses": num_m,
+            "prov": prov_k,
+            "enc": enc_k,
+            "custo": prov_k + enc_k,
+        }
+
+    tri_meses = sum(tot_u[k]["meses"] for k in (1, 2, 3))
+    tri_prov = sum(tot_u[k]["prov"] for k in (1, 2, 3))
+    tri_enc = sum(tot_u[k]["enc"] for k in (1, 2, 3))
+    tri_custo = sum(tot_u[k]["custo"] for k in (1, 2, 3))
+
+    col_ano1 = f"{ano1}*" if eh_parcial else str(ano1)
+    dados_tri = [
+        [Paragraph("Etapa da Memória de Cálculo", st_th), Paragraph(col_ano1, st_th), Paragraph(str(ano2), st_th), Paragraph(str(ano3), st_th), Paragraph("Total (3 Anos)", st_th)],
+        [Paragraph("Meses de efetivo exercício no ano", st_td), Paragraph(f"{tot_u[1]['meses']} meses", st_td_c), Paragraph(f"{tot_u[2]['meses']} meses", st_td_c), Paragraph(f"{tot_u[3]['meses']} meses", st_td_c), Paragraph(f"{tri_meses} meses", st_td_c)],
+        [Paragraph("(A) Subtotal de Proventos Anuais (1 Servidor)", st_td), Paragraph(formatar_brl(tot_u[1]["prov"]), st_td_r), Paragraph(formatar_brl(tot_u[2]["prov"]), st_td_r), Paragraph(formatar_brl(tot_u[3]["prov"]), st_td_r), Paragraph(formatar_brl(tri_prov), st_td_r)],
+        [Paragraph("(B) Subtotal de Encargos Patronais Anuais (1 Servidor)", st_td), Paragraph(formatar_brl(tot_u[1]["enc"]), st_td_r), Paragraph(formatar_brl(tot_u[2]["enc"]), st_td_r), Paragraph(formatar_brl(tot_u[3]["enc"]), st_td_r), Paragraph(formatar_brl(tri_enc), st_td_r)],
+        [Paragraph("(C) Custo Total Anual por Servidor (A + B)", st_td_b), Paragraph(formatar_brl(tot_u[1]["custo"]), st_td_rb), Paragraph(formatar_brl(tot_u[2]["custo"]), st_td_rb), Paragraph(formatar_brl(tot_u[3]["custo"]), st_td_rb), Paragraph(formatar_brl(tri_custo), st_td_rb)],
+        [Paragraph("(D) Multiplicador de Vagas Solicitadas", st_td_b), Paragraph(f"× {vagas}", st_td_c), Paragraph(f"× {vagas}", st_td_c), Paragraph(f"× {vagas}", st_td_c), Paragraph(f"× {vagas}", st_td_c)],
+        [Paragraph("(E) IMPACTO ORÇAMENTÁRIO TOTAL (C × D)", st_td_b), Paragraph(formatar_brl(tot_u[1]["custo"] * vagas), st_td_rb), Paragraph(formatar_brl(tot_u[2]["custo"] * vagas), st_td_rb), Paragraph(formatar_brl(tot_u[3]["custo"] * vagas), st_td_rb), Paragraph(formatar_brl(tri_custo * vagas), st_td_rb)],
+    ]
+    tab_tri = Table(dados_tri, colWidths=[6.8 * cm, 2.8 * cm, 2.8 * cm, 2.8 * cm, 2.8 * cm])
+    tab_tri.setStyle(TableStyle([
+        ("GRID", (0, 0), (-1, -1), 0.5, colors.black),
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#E7E6E6")),
+        ("TOPPADDING", (0, 0), (-1, -1), 1.5),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 1.5),
+        ("BACKGROUND", (0, 4), (-1, 4), colors.HexColor("#E7E6E6")),
+        ("BACKGROUND", (0, 6), (-1, 6), colors.HexColor("#D9E1F2")),
+    ]))
+    historia.append(tab_tri)
+    historia.append(Spacer(1, 5))
+
+    # 5. Base Legal
+    historia.append(Paragraph("5. EMBASAMENTO LEGAL E NOTAS METODOLÓGICAS", st_sec))
+    historia.append(Spacer(1, 2))
+    texto_legal = (
+        "<b>Regime Previdenciário e Cota Patronal:</b> Conforme art. 40, § 13 da CF/88 c/c Lei Federal nº 8.212/1991 (art. 22, I) "
+        "para servidores temporários (RGPS/INSS – 20%) ou Lei Estadual nº 11.357/2009 c/c Lei Estadual nº 14.520/2022 para efetivos (RPPS – 28%).<br/>"
+        "<b>Não Incidência Previdenciária sobre 1/3 de Férias:</b> Não há incidência de encargo patronal sobre o adicional de férias.<br/>"
+        "<b>Exclusão de Verbas Indenizatórias:</b> Benefícios indenizatórios (auxílio-transporte, alimentação etc.) não integram o custo de pessoal apurado."
+    )
+    tab_legal = Table([[Paragraph(texto_legal, ParagraphStyle("leg", fontName="Helvetica", fontSize=6.8, leading=8.8, textColor=colors.HexColor("#333333")))]], colWidths=[18.0 * cm])
+    tab_legal.setStyle(TableStyle([
+        ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#B0B0B0")),
+        ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#F9F9F9")),
+        ("TOPPADDING", (0, 0), (-1, -1), 2.5),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 2.5),
+        ("LEFTPADDING", (0, 0), (-1, -1), 5),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 5),
+    ]))
+    historia.append(tab_legal)
+
+    rodape = _formatar_rodape(res)
+    doc.build(historia, canvasmaker=_criar_canvas(rodape))
     return buffer.getvalue()
 
 
@@ -925,9 +1297,11 @@ def gerar_pdf(
     resumo: pd.DataFrame,
     tipo: str = "sintetico",
 ) -> bytes:
-    """Gera o relatório PDF. tipo='sintetico' (padrão oficial UEFS) ou tipo='detalhado'."""
+    """Gera o relatório PDF. tipo='sintetico' (padrão oficial UEFS), tipo='memoria_calculo' ou tipo='detalhado'."""
     if tipo == "detalhado":
         return _gerar_pdf_detalhado(res, resumo)
+    if tipo == "memoria_calculo":
+        return _gerar_pdf_memoria_calculo(res, resumo)
     return _gerar_pdf_sintetico(res, resumo)
 
 

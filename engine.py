@@ -43,6 +43,15 @@ CH_JORNALISTA = "25h"
 CHS_JORNALISTA: tuple[str, ...] = ("25h", "35h")
 ROTULO_GRATIFICACAO = "Gratificação"
 
+SETORES: dict[str, str] = {
+    "GRH": "Gerência de Recursos Humanos",
+    "NSA": "Núcleo de Seleção e Alocação",
+    "SPAG": "Subgerência de Pagamentos",
+    "SAAP": "Subgerência de Admissão e Acompanhamento de Pessoas",
+}
+SIGLAS_SETORES: tuple[str, ...] = ("GRH", "NSA", "SPAG", "SAAP")
+SETOR_PADRAO: str = "GRH"
+
 COLUNAS_BASE: tuple[str, ...] = (
     "Cargo",
     "Vinculo",
@@ -278,6 +287,7 @@ class Simulacao:
     cargo: str
     ch: str
     observacao: str = ""  # Campo opcional para detalhamentos do usuário
+    setor: str = SETOR_PADRAO  # Setor responsável: GRH, NSA, SPAG, SAAP
     mes_ingresso: int
     ano_ingresso: int
     quantidade_vagas: int = 1
@@ -486,8 +496,10 @@ def projetar(sim: Simulacao, tabela: pd.DataFrame) -> ResultadoSimulacao:
         rbm_exata = vencimento + gratificacao + incentivo
         rbm = arredondar(rbm_exata)
         decimo_exato = rbm_exata / Decimal(12)
-        ferias_exata = (rbm_exata / Decimal(3)) / Decimal(12)
-        inss_exato = (rbm_exata + decimo_exato + ferias_exata) * aliq_patronal
+        ferias_exata = (
+            _ZERO if ano_projecao == 1 else (rbm_exata / Decimal(3)) / Decimal(12)
+        )
+        inss_exato = (rbm_exata + decimo_exato) * aliq_patronal
         decimo = arredondar(decimo_exato)
         ferias = arredondar(ferias_exata)
         inss = arredondar(inss_exato)
@@ -524,6 +536,9 @@ def projetar(sim: Simulacao, tabela: pd.DataFrame) -> ResultadoSimulacao:
         "nivel_classe_descricao": definicao.nivel_classe,
         "incentivo_descricao": definicao.incentivo_descricao,
         "observacao": (sim.observacao or "").strip(),
+        "setor": getattr(sim, "setor", SETOR_PADRAO),
+        "setor_nome": SETORES.get(getattr(sim, "setor", SETOR_PADRAO), ""),
+        "setor_descricao": f"{getattr(sim, 'setor', SETOR_PADRAO)} - {SETORES.get(getattr(sim, 'setor', SETOR_PADRAO), '')}",
         "mes_ingresso": sim.mes_ingresso,
         "ano_ingresso": sim.ano_ingresso,
         "quantidade_vagas": sim.quantidade_vagas,

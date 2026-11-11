@@ -165,7 +165,8 @@ def pagina_simulacao() -> None:
 
     col_nivel, col_inc = st.columns(2)
     col_nivel.text_input("Nível/Classe", value=cargo.nivel_classe, disabled=True)
-    col_inc.text_input("Incentivo/Adicional", value=cargo.incentivo_descricao, disabled=True)
+    rotulo_inc_ui = "Incentivo" if cargo.categoria == engine.CATEGORIA_DOCENTES else "Gratificação"
+    col_inc.text_input(rotulo_inc_ui, value=cargo.incentivo_descricao, disabled=True)
     if cargo.is_jornalista:
         if len(cargo.chs) == 1:
             chs_texto = f"carga horária única de {cargo.chs[0]}"
@@ -207,6 +208,15 @@ def pagina_simulacao() -> None:
         col7.number_input("Quantidade de vagas", min_value=1, step=1, key="quantidade_vagas")
     )
 
+    _padrao("setor", engine.SETOR_PADRAO)
+    setor = st.selectbox(
+        "Setor responsável",
+        options=engine.SIGLAS_SETORES,
+        format_func=lambda s: f"{s} - {engine.SETORES.get(s, '')}",
+        key="setor",
+        help="Setor da UEFS que elaborou a projeção de impacto orçamentário.",
+    )
+
     percentual_motorista: float | None = None
     if cargo.is_motorista:
         valor_planilha = _percentual_planilha(base, cargo, ch, mes_ingresso, ano_ingresso)
@@ -245,6 +255,7 @@ def pagina_simulacao() -> None:
             cargo=cargo_nome,
             ch=ch,
             observacao=observacao or "",
+            setor=setor,
             mes_ingresso=mes_ingresso,
             ano_ingresso=ano_ingresso,
             quantidade_vagas=quantidade,
@@ -259,94 +270,43 @@ def pagina_simulacao() -> None:
 
 
 def _renderizar_resultado(res: ResultadoSimulacao) -> None:
-    """Exibe métricas, resumo anual, detalhamento mensal e downloads."""
+    """Exibe apenas a opção de download dos relatórios Sintético e Detalhado."""
     md = res.metadados
     resumo = engine.resumo_anual(res)
+
     st.divider()
-    st.subheader("Resultado da projeção")
-    st.caption(
-        f"{md['cargo']} · {md['vinculo']} · {md['ch']} · ingresso "
-        f"{engine.competencia(md['mes_ingresso'], md['ano_ingresso'])} · "
-        f"{relatorios.periodo_projetado(res)} · {md['quantidade_vagas']} vaga(s)"
-    )
-
-    col1, col2, col3 = st.columns(3)
-    col1.metric(
-        "Impacto Total (Ano 1 parcial + Anos 2 e 3)",
-        formatar_brl(md["total_geral"]),
-        help="Soma do período projetado multiplicada pela quantidade de vagas.",
-    )
-    col2.metric("Custo por vaga (período)", formatar_brl(md["total_por_vaga"]))
-    col3.metric("Custo médio mensal (por vaga)", formatar_brl(md["custo_medio_mensal"]))
-
-    anos = resumo[resumo["Ano"] != "TOTAL"]
-    colunas_ano = st.columns(max(len(anos), 1))
-    for coluna, (_, linha) in zip(colunas_ano, anos.iterrows()):
-        coluna.metric(
-            str(linha["Ano"]),
-            formatar_brl(linha["Custo Total (vagas)"]),
-            help=f"{int(linha['Meses'])} meses; por vaga: {formatar_brl(linha['Custo por Vaga'])}",
-        )
-
-    st.markdown("**Resumo por ano**")
-    st.dataframe(
-        relatorios.formatar_colunas_brl(resumo, relatorios.COLUNAS_MONETARIAS_RESUMO),
-        hide_index=True,
-    )
-
-    with st.expander("Detalhamento mensal (período projetado)"):
-        mensal = relatorios.tabela_mensal(res)
-        st.dataframe(
-            relatorios.formatar_colunas_brl(mensal, relatorios.COLUNAS_MONETARIAS_MENSAL),
-            hide_index=True,
-        )
-
-    with st.expander("Embasamento legal dos encargos patronais (Efetivo 28% vs. Temporário 20%)"):
-        st.markdown(
-            "**1. Servidores Efetivos (28% – RPPS / Estado da Bahia):**\n"
-            "- **Base e Alíquota:** Art. 68 da Lei Estadual nº 11.357/2009 c/c Lei Estadual nº 14.520/2022 "
-            "(cota patronal de 28% devida pelo Estado aos fundos FUNPREV/BAPREV).\n"
-            "- **Férias e Terço (1/3) Constitucional:** Natureza remuneratória habitual (art. 92 da Lei Estadual nº 6.677/1994) "
-            "e repercussão geral pacificada pelo STF no **Tema 985 (RE 1.072.485)**.\n\n"
-            "**2. Servidores Temporários / REDA (20% – RGPS / INSS):**\n"
-            "- **Vínculo e Alíquota:** Art. 40, § 13 da CF/88 (vinculação obrigatória ao RGPS/INSS) c/c art. 22, I da "
-            "Lei Federal nº 8.212/1991 (alíquota patronal padrão de 20%).\n"
-            "- **Férias e Terço (1/3) Constitucional:** Art. 214, § 4º do Decreto Federal nº 3.048/1999 (férias gozadas integram o "
-            "salário-de-contribuição) e jurisprudência vinculante do STF no **Tema 985**."
-        )
-
+    if md.get("setor_descricao"):
+        st.caption(f"Setor responsável: **{md['setor_descricao']}**")
     if md.get("observacao"):
         st.caption(f"Observações do usuário: {md['observacao']}")
 
-    st.markdown("**Exportar resultado**")
+    st.subheader("Relatórios disponíveis para download")
+    st.write("A projeção foi calculada com sucesso. Selecione o relatório desejado para baixar:")
+
     try:
         pdf_sintetico = relatorios.gerar_pdf(res, resumo, tipo="sintetico")
         pdf_detalhado = relatorios.gerar_pdf(res, resumo, tipo="detalhado")
-        excel = relatorios.gerar_excel(res, resumo)
-        csv = relatorios.gerar_csv(res)
     except Exception:  # noqa: BLE001 - nunca exibir traceback ao usuário
-        st.error("Não foi possível gerar os arquivos de exportação.")
+        st.error("Não foi possível gerar os relatórios em PDF.")
         return
-    col_pdf1, col_pdf2, col_xlsx, col_csv = st.columns(4)
+
+    col_pdf1, col_pdf2 = st.columns(2)
     col_pdf1.download_button(
-        "Baixar PDF (Sintético)", pdf_sintetico,
+        "📄 Baixar Relatório Sintético (PDF)",
+        pdf_sintetico,
         file_name=relatorios.nome_arquivo(res, "pdf"),
-        mime="application/pdf", key="download_pdf_sintetico",
-        help="Relatório sintético no modelo oficial de demonstrativo da UEFS.",
+        mime="application/pdf",
+        key="download_pdf_sintetico",
+        type="primary",
+        help="Demonstrativo sintético oficial de impacto orçamentário da UEFS.",
     )
     col_pdf2.download_button(
-        "Baixar PDF (Detalhado)", pdf_detalhado,
+        "📑 Baixar Relatório Detalhado (PDF)",
+        pdf_detalhado,
         file_name=relatorios.nome_arquivo(res, "pdf").replace(".pdf", "_detalhado.pdf"),
-        mime="application/pdf", key="download_pdf_detalhado",
-        help="Relatório com detalhamento mensal e metodologia completa.",
-    )
-    col_xlsx.download_button(
-        "Baixar Excel (.xlsx)", excel, file_name=relatorios.nome_arquivo(res, "xlsx"),
-        mime=MIME_XLSX, key="download_xlsx",
-    )
-    col_csv.download_button(
-        "Baixar CSV", csv, file_name=relatorios.nome_arquivo(res, "csv"),
-        mime="text/csv", key="download_csv",
+        mime="application/pdf",
+        key="download_pdf_detalhado",
+        help="Relatório detalhado mensal com metodologia e embasamento completo.",
     )
 
 
@@ -760,9 +720,10 @@ def pagina_importacao() -> None:
 
             cargo_def = engine.obter_cargo(cat_manual, vinculo_manual, cargo_manual)
             if cargo_def is not None:
+                rotulo_inc_cat = "Incentivo" if cargo_def.categoria == engine.CATEGORIA_DOCENTES else "Gratificação"
                 st.caption(
                     f"Catálogo oficial: Nível/Classe **{cargo_def.nivel_classe}** · "
-                    f"Incentivo/Adicional: **{cargo_def.incentivo_descricao}**"
+                    f"{rotulo_inc_cat}: **{cargo_def.incentivo_descricao}**"
                 )
 
             col_v1, col_v2, col_v3 = st.columns(3)

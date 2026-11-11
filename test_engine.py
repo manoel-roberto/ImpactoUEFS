@@ -102,19 +102,23 @@ def test_efetivo_sem_variacao() -> None:
     for mes in res.meses:
         assert mes["rbm"] == 5000.00
         assert mes["decimo_terceiro"] == 416.67
-        assert mes["ferias"] == 138.89
-        assert mes["inss"] == 1555.56  # 28% sobre (5000 + 416.666... + 138.888...)
-        assert mes["custo_total"] == 7111.12
+        assert mes["inss"] == 1516.67  # 28% sobre (5000 + 416.666...) sem incidir sobre férias
+        if mes["ano_projecao"] == 1:
+            assert mes["ferias"] == 0.00
+            assert mes["custo_total"] == 6933.34
+        else:
+            assert mes["ferias"] == 138.89
+            assert mes["custo_total"] == 7072.23
         assert mes["extrapolado"] is False
     soma = round(sum(m["custo_total"] for m in res.meses), 2)
-    assert res.metadados["total_por_vaga"] == soma == 256000.32
+    assert res.metadados["total_por_vaga"] == soma == 252933.60
     contagem = pd.Series([m["ano"] for m in res.meses]).value_counts().to_dict()
     assert contagem == {2027: 12, 2028: 12, 2029: 12}
     resumo = resumo_anual(res)
     assert list(resumo.columns) == [c for c in engine.COLUNAS_RESUMO if c != "Incentivo"]
     assert list(resumo["Ano"]) == ["Ano 1 (2027)", "Ano 2 (2028)", "Ano 3 (2029)", "TOTAL"]
-    assert resumo.iloc[-1]["Custo por Vaga"] == pytest.approx(256000.32)
-    assert res.metadados["custo_medio_mensal"] == 7111.12
+    assert resumo.iloc[-1]["Custo por Vaga"] == pytest.approx(252933.60)
+    assert res.metadados["custo_medio_mensal"] == 7025.93
 
 
 # 2. Docente ------------------------------------------------------------------
@@ -125,8 +129,9 @@ def test_docente_incentivo_sobre_vencimento() -> None:
     assert primeiro["rbm"] == 4800.00
     assert primeiro["incentivo"] == 800.00
     assert primeiro["gratificacao"] == 0.00
-    assert primeiro["inss"] == 1493.33  # 28% sobre 5333.333...
-    assert primeiro["custo_total"] == 6826.66
+    assert primeiro["ferias"] == 0.00
+    assert primeiro["inss"] == 1456.00  # 28% sobre (4800 + 400)
+    assert primeiro["custo_total"] == 6656.00
     assert res.metadados["incentivo_descricao"] == "Especialização, 20%"
 
 
@@ -137,7 +142,7 @@ def test_motorista_sem_gratificacao_com_percentual_da_planilha() -> None:
     primeiro = res.meses[0]
     assert primeiro["gratificacao"] == 0.00
     assert primeiro["rbm"] == 2200.00
-    assert primeiro["custo_total"] == 2933.33
+    assert primeiro["custo_total"] == 2860.00
     assert res.metadados["percentual_motorista_usado"] == 10.0
 
 
@@ -147,7 +152,10 @@ def test_motorista_sem_gratificacao_percentual_sobrescrito_no_formulario() -> No
     for mes in res.meses:
         assert mes["gratificacao"] == 0.00
         assert mes["rbm"] == 2400.00
-        assert mes["custo_total"] == 3200.00
+        if mes["ano_projecao"] == 1:
+            assert mes["custo_total"] == 3120.00
+        else:
+            assert mes["custo_total"] == 3186.67
     assert res.metadados["percentual_motorista_usado"] == 20.0
 
 
@@ -161,15 +169,21 @@ def test_temporario_prorrogacao_automatica() -> None:
         assert set(mes) == set(engine.CHAVES_MES)
         assert not any(chave.startswith("ativ") for chave in mes)
         assert mes["rbm"] == 5000.00
-        assert mes["custo_total"] == 6666.67
-    assert res.metadados["custo_medio_mensal"] == 6666.67
-    assert res.metadados["total_por_vaga"] == round(6666.67 * 36, 2)
+        if mes["ano_projecao"] == 1:
+            assert mes["ferias"] == 0.00
+            assert mes["custo_total"] == 6500.00
+        else:
+            assert mes["ferias"] == 138.89
+            assert mes["custo_total"] == 6638.89
+    assert res.metadados["custo_medio_mensal"] == 6592.59
+    assert res.metadados["total_por_vaga"] == 237333.36
     res_julho = projetar(
         _sim(vinculo="Temporário", cargo="Técnico de Nível Médio", ch="40h", mes_ingresso=7),
         tabela,
     )
     assert len(res_julho.meses) == 30
-    assert all(m["custo_total"] == 6666.67 for m in res_julho.meses)
+    assert all(m["custo_total"] == 6500.00 for m in res_julho.meses if m["ano_projecao"] == 1)
+    assert all(m["custo_total"] == 6638.89 for m in res_julho.meses if m["ano_projecao"] > 1)
 
 
 # Jornalista ------------------------------------------------------------------
@@ -183,10 +197,14 @@ def test_jornalista_25h_caso_de_referencia() -> None:
         assert mes["incentivo"] == 0.00
         assert mes["rbm"] == 2918.55
         assert mes["decimo_terceiro"] == 243.21
-        assert mes["ferias"] == 81.07
-        assert mes["inss"] == 648.57
-        assert mes["custo_total"] == 3891.40
-    assert res.metadados["total_por_vaga"] == 140090.40
+        assert mes["inss"] == 632.35
+        if mes["ano_projecao"] == 1:
+            assert mes["ferias"] == 0.00
+            assert mes["custo_total"] == 3794.11
+        else:
+            assert mes["ferias"] == 81.07
+            assert mes["custo_total"] == 3875.18
+    assert res.metadados["total_por_vaga"] == 138533.64
     assert res.metadados["nivel_classe_descricao"] == "Classe I"
     resumo = resumo_anual(res)
     ano1 = resumo.iloc[0]
@@ -195,8 +213,8 @@ def test_jornalista_25h_caso_de_referencia() -> None:
     assert ano1[engine.ROTULO_GRATIFICACAO] == pytest.approx(13555.80)
     assert "Incentivo" not in ano1
     assert ano1["RBM"] == pytest.approx(35022.60)
-    assert ano1["Custo por Vaga"] == pytest.approx(46696.80)
-    assert resumo.iloc[-1]["Custo por Vaga"] == pytest.approx(140090.40)
+    assert ano1["Custo por Vaga"] == pytest.approx(45529.32)
+    assert resumo.iloc[-1]["Custo por Vaga"] == pytest.approx(138533.64)
 
 
 def test_jornalista_25h_e_35h_aceitas() -> None:
@@ -519,7 +537,7 @@ def test_relatorios_gerados() -> None:
 
     csv = relatorios.gerar_csv(res).decode("utf-8-sig")
     assert "Observação Automática" in csv
-    assert "7111,12" in csv
+    assert "7072,23" in csv
     assert relatorios.nome_arquivo(res, "pdf").startswith("impacto_tecnico_universitario_")
 
 
@@ -613,23 +631,23 @@ def test_aliquotas_patronais_efetivo_e_temporario() -> None:
     assert engine.ALIQ_PATRONAL_TEMPORARIO == Decimal("0.20")
 
     # Teste de cálculo: vencimento 3000
-    # RBM = 3000, 13º = 250, férias = 83.3333...
-    # Base encargo = 3333.3333...
+    # RBM = 3000, 13º = 250, férias = 0 no ano 1 (e não incide encargo patronal sobre férias)
+    # Base encargo = 3250
     tabela_efetivo = _tabela(_linha(TEC_UNIV, 3000))
     res_efetivo = projetar(_sim(), tabela_efetivo)
     primeiro_efetivo = res_efetivo.meses[0]
-    # Encargo 28% de 3333.3333... = 933.3333... -> 933.33
-    assert primeiro_efetivo["inss"] == 933.33
-    assert primeiro_efetivo["custo_total"] == 4266.66
+    # Encargo 28% de 3250 = 910.00
+    assert primeiro_efetivo["inss"] == 910.00
+    assert primeiro_efetivo["custo_total"] == 4160.00
     assert res_efetivo.metadados["aliquota_patronal"] == 0.28
 
     tabela_temp = _tabela(_linha(("Técnico de Nível Médio", "Temporário", "40h"), 3000))
     sim_temp = _sim(vinculo="Temporário", cargo="Técnico de Nível Médio", ch="40h")
     res_temp = projetar(sim_temp, tabela_temp)
     primeiro_temp = res_temp.meses[0]
-    # Encargo 20% de 3333.3333... = 666.6666... -> 666.67
-    assert primeiro_temp["inss"] == 666.67
-    assert primeiro_temp["custo_total"] == 4000.00
+    # Encargo 20% de 3250 = 650.00
+    assert primeiro_temp["inss"] == 650.00
+    assert primeiro_temp["custo_total"] == 3900.00
     assert res_temp.metadados["aliquota_patronal"] == 0.20
 
 
@@ -665,20 +683,64 @@ def test_relatorio_pdf_sintetico_layout_uefs() -> None:
     assert b"Demonstrativo Sint" in pdf_sintetico or b"Impacto" in pdf_sintetico
 
     # Verifica linhas da matriz sintética (Tabela 2)
-    tabela2, _, _ = relatorios._tabelas_matriz_impacto_sintetico(res)
-    assert "Mensal" in tabela2._cellvalues[5][0]
-    assert "Anual" in tabela2._cellvalues[6][0]
-    assert tabela2._cellvalues[7][0] == "SUBTOTAL DE ENCARGOS (ANUAL)"
-    assert tabela2._cellvalues[8][0] == "TOTAL ANUAL GERAL"
-    assert "Total Geral da Contratação (02 vagas)" in tabela2._cellvalues[9][0].text
+    tabela2 = relatorios._tabelas_matriz_impacto_sintetico(res)
+    assert tabela2._cellvalues[0][0] == "Composição"
+    assert tabela2._cellvalues[0][4] == "Total (3 Anos)"
+    assert "Rendimento Básico Mensal" in tabela2._cellvalues[1][0].text
+    assert "1 vaga" in tabela2._cellvalues[1][0].text
+    assert "SUBTOTAL DE PROVENTOS (1 VAGA)" in tabela2._cellvalues[4][0]
+    assert "13º Salário" in tabela2._cellvalues[6][0]
+    assert "Total Mensal" in tabela2._cellvalues[7][0]
+    assert "Total Anual" in tabela2._cellvalues[8][0]
+    assert tabela2._cellvalues[9][0] == "SUBTOTAL DE ENCARGOS (1 VAGA)"
+    assert "CUSTO TOTAL DE 1 VAGA" in tabela2._cellvalues[10][0]
+    assert "Quantidade de Vaga(s)" in tabela2._cellvalues[11][0]
+    assert "TOTAL GERAL (02 VAGAS)" in tabela2._cellvalues[12][0]
 
-    # 2. Geração detalhada (tipo="detalhado")
+    # Verifica que itens removidos não constam no PDF sintético
+    import shutil
+    import subprocess
+    if shutil.which("pdftotext"):
+        proc = subprocess.run(["pdftotext", "-", "-"], input=pdf_sintetico, capture_output=True, check=True)
+        txt = proc.stdout.decode("utf-8")
+        assert "regime de 40h:" not in txt
+        assert "s/ Férias (1/3)" not in txt
+        assert "Custo Unitário (1 Servidor)" not in txt
+        assert "Especificação da Base de Incidência" not in txt
+
+    # Verifica parâmetros de cálculo no relatório sintético
+    tabela_param = relatorios._tabela_parametros_sintetico(res)
+    assert tabela_param is not None
+    textos_param = [c.text for linha in tabela_param._cellvalues for c in linha if hasattr(c, "text")]
+    assert any("Parâmetros de cálculo" in t or "Parâmetros de calculo" in t for t in textos_param)
+    assert any("Categoria:" in t for t in textos_param)
+    assert any("Vínculo:" in t for t in textos_param)
+    assert any("Cargo Professor:" in t for t in textos_param)
+    assert any("Nível/Classe:" in t for t in textos_param)
+    assert any("Carga Horária:" in t for t in textos_param)
+    assert any("Quantidade de vaga(s):" in t for t in textos_param)
+
+    # 2. Geração da Memória de Cálculo (tipo="memoria_calculo")
+    pdf_memoria = relatorios.gerar_pdf(res, resumo, tipo="memoria_calculo")
+    assert pdf_memoria[:4] == b"%PDF"
+    assert pdf_memoria.count(b"/Subtype /Image") >= 3
+    assert len(pdf_memoria) > 0
+    import shutil
+    import subprocess
+    if shutil.which("pdftotext"):
+        proc = subprocess.run(["pdftotext", "-", "-"], input=pdf_memoria, capture_output=True, check=True)
+        txt = proc.stdout.decode("utf-8")
+        assert "MEMÓRIA DE CÁLCULO" in txt
+        assert "Não incide encargo patronal" in txt
+        assert "RBM ÷ 12" in txt
+
+    # 3. Geração detalhada (tipo="detalhado")
     pdf_detalhado = relatorios.gerar_pdf(res, resumo, tipo="detalhado")
     assert pdf_detalhado[:4] == b"%PDF"
     assert pdf_detalhado.count(b"/Subtype /Image") >= 3
     assert len(pdf_detalhado) > 0
 
-    # 3. Teste para Temporário (alíquota 20%)
+    # 4. Teste para Temporário (alíquota 20%)
     sim_temp = _sim(
         categoria="Técnicos",
         vinculo="Temporário",
@@ -691,6 +753,8 @@ def test_relatorio_pdf_sintetico_layout_uefs() -> None:
     resumo_temp = resumo_anual(res_temp)
     pdf_temp = relatorios.gerar_pdf(res_temp, resumo_temp, tipo="sintetico")
     assert pdf_temp[:4] == b"%PDF"
+    pdf_memoria_temp = relatorios.gerar_pdf(res_temp, resumo_temp, tipo="memoria_calculo")
+    assert pdf_memoria_temp[:4] == b"%PDF"
 
 
 def test_historico_encadeamento_temporal_automatico() -> None:
@@ -876,6 +940,123 @@ def test_sqlite_cadastro_manual_e_edicao_completa(tmp_path: Any) -> None:
     assert len(hist_pos_delete) == 1
     # Ao deletar o posterior, o registro anterior volta a ser o último e deve reabrir a vigência
     assert hist_pos_delete.loc[0, "Vencimento_Basico"] == 5000.0
+
+
+def test_novas_regras_ferias_encargos_e_parametros_sintetico() -> None:
+    # 1. Regra de férias (0 no ano 1, calculadas a partir do ano 2)
+    # 2. Regra de encargos patronais (não incide sobre 1/3 de férias)
+    sim = _sim(
+        categoria="Docentes",
+        vinculo="Efetivo",
+        cargo="Professor Assistente",
+        ch="40h",
+        quantidade_vagas=3,
+        mes_ingresso=1,
+        ano_ingresso=2027,
+    )
+    tabela = _tabela(_linha(("Professor Assistente", "Efetivo", "40h"), 6000))
+    res = projetar(sim, tabela)
+    assert len(res.meses) == 36
+
+    for mes in res.meses:
+        # Base RBM = 6000 + 2400 (Mestrado 40% para Assistente) = 8400.00
+        assert mes["rbm"] == 8400.00
+        assert mes["decimo_terceiro"] == 700.00
+        # Encargo patronal: 28% sobre (8400 + 700) = 2548.00 (SEM 1/3 de férias)
+        assert mes["inss"] == 2548.00
+
+        if mes["ano_projecao"] == 1:
+            assert mes["ferias"] == 0.00
+            assert mes["custo_total"] == 8400.00 + 700.00 + 0.00 + 2548.00 == 11648.00
+        else:
+            # A partir do ano 2: Férias = 8400 / 36 = 233.33
+            assert mes["ferias"] == 233.33
+            assert mes["custo_total"] == 8400.00 + 700.00 + 233.33 + 2548.00 == 11881.33
+
+    # 3. Relatório Sintético com Parâmetros da Simulação
+    resumo = resumo_anual(res)
+    pdf = relatorios.gerar_pdf(res, resumo, tipo="sintetico")
+    assert pdf[:4] == b"%PDF"
+
+    tab_param = relatorios._tabela_parametros_sintetico(res)
+    assert tab_param is not None
+    textos = [c.text for linha in tab_param._cellvalues for c in linha if hasattr(c, "text")]
+    assert any("Parâmetros de cálculo" in t or "Parâmetros de calculo" in t for t in textos)
+    assert any("Categoria:" in t for t in textos)
+    assert any("Vínculo:" in t for t in textos)
+    assert any("Cargo Professor:" in t for t in textos)
+    assert any("Nível/Classe:" in t for t in textos)
+    assert any("Carga Horária:" in t for t in textos)
+    assert any("Quantidade de vaga(s):" in t for t in textos)
+    assert any("* Início em 01 de Janeiro de 2027" in t or "* Inicio em 01 de Janeiro de 2027" in t for t in textos)
+
+    # Teste com ingresso em Julho de 2027
+    sim_julho = _sim(
+        categoria="Docentes",
+        vinculo="Efetivo",
+        cargo="Professor Assistente",
+        ch="40h",
+        mes_ingresso=7,
+        ano_ingresso=2027,
+    )
+    res_julho = projetar(sim_julho, tabela)
+    tab_param_julho = relatorios._tabela_parametros_sintetico(res_julho)
+    textos_julho = [c.text for linha in tab_param_julho._cellvalues for c in linha if hasattr(c, "text")]
+    assert any("* Início em 01 de Julho de 2027" in t or "* Inicio em 01 de Julho de 2027" in t for t in textos_julho)
+
+    # Verifica que para Docentes a coluna de composição da remuneração é "INCENTIVOS"
+    tab1_doc = relatorios._tabela_remuneracao_base_sintetico(res)
+    assert tab1_doc._cellvalues[0][2] == "INCENTIVOS"
+
+    # Verifica que para Técnicos a coluna de composição da remuneração é "GRATIFICAÇÃO"
+    sim_tec = _sim(categoria="Técnicos", cargo="Técnico Universitário", ch="30h")
+    tabela_tec = _tabela(_linha(TEC_UNIV, 5000))
+    res_tec = projetar(sim_tec, tabela_tec)
+    tab1_tec = relatorios._tabela_remuneracao_base_sintetico(res_tec)
+    assert tab1_tec._cellvalues[0][2] == "GRATIFICAÇÃO"
+
+
+def test_setores_opcoes_e_rodape() -> None:
+    """Verifica as 4 siglas de setor (GRH, NSA, SPAG, SAAP) e sua exibição no rodapé dos relatórios."""
+    import subprocess
+    import shutil
+
+    assert set(engine.SIGLAS_SETORES) == {"GRH", "NSA", "SPAG", "SAAP"}
+    assert "Gerência de Recursos Humanos" in engine.SETORES["GRH"]
+    assert "Núcleo de Seleção e Alocação" in engine.SETORES["NSA"]
+    assert "Subgerência de Pagamentos" in engine.SETORES["SPAG"]
+    assert "Subgerência de Admissão e Acompanhamento de Pessoas" in engine.SETORES["SAAP"]
+
+    tabela = _tabela(_linha(("Professor Auxiliar", "Efetivo", "40h"), 5000))
+
+    for sigla in engine.SIGLAS_SETORES:
+        sim = _sim(
+            categoria="Docentes",
+            vinculo="Efetivo",
+            cargo="Professor Auxiliar",
+            ch="40h",
+            setor=sigla,
+        )
+        res = projetar(sim, tabela)
+        assert res.metadados["setor"] == sigla
+        assert engine.SETORES[sigla] in res.metadados["setor_descricao"]
+
+        resumo = resumo_anual(res)
+        pdf_sintetico = relatorios.gerar_pdf(res, resumo, tipo="sintetico")
+        assert pdf_sintetico[:4] == b"%PDF"
+
+        if shutil.which("pdftotext"):
+            proc = subprocess.run(["pdftotext", "-", "-"], input=pdf_sintetico, capture_output=True, check=True)
+            txt = proc.stdout.decode("utf-8")
+            assert sigla in txt
+            assert engine.SETORES[sigla] in txt
+
+        # Verifica nos parâmetros
+        params = relatorios._parametros(res, incluir_totais=False)
+        rotulos = [p[0] for p in params]
+        assert "Setor responsável" in rotulos
+
+
 
 
 
