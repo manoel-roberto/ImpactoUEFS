@@ -16,7 +16,14 @@ from openpyxl import Workbook
 from openpyxl.styles import Alignment, Font, PatternFill
 
 import engine
-from engine import CARGO_MOTORISTA, CATALOGO, COLUNAS_BASE, VINCULO_EFETIVO, VINCULO_TEMPORARIO
+from engine import (
+    CARGO_JORNALISTA,
+    CARGO_MOTORISTA,
+    CATALOGO,
+    COLUNAS_BASE,
+    VINCULO_EFETIVO,
+    VINCULO_TEMPORARIO,
+)
 
 COLUNAS_OBRIGATORIAS: tuple[str, ...] = COLUNAS_BASE
 COLUNAS_CHAVE_PRIMARIA: tuple[str, ...] = (
@@ -40,6 +47,12 @@ AVISO_COLUNA_LEGADA = (
     f"Coluna '{COLUNA_GRATIFICACAO_LEGADA}' foi renomeada para '{COLUNA_GRATIFICACAO}'; "
     "atualize sua planilha."
 )
+
+CARGOS_LEGADOS: dict[str, str] = {
+    "Técnico Administrativo (Motorista)": CARGO_MOTORISTA,
+    "Técnico de Nível Superior (Jornalista)": CARGO_JORNALISTA,
+}
+CAMINHO_BASE_INICIAL = Path(__file__).resolve().parent / "Base inicial 04.11.2026 - Página2.csv"
 
 _FORMATOS_DATA: tuple[str, ...] = (
     "%d/%m/%Y",
@@ -362,6 +375,8 @@ def _converter_sql_para_dataframe(df_sql: pd.DataFrame) -> pd.DataFrame:
         if col not in df.columns:
             df[col] = None
     df = df[list(COLUNAS_OBRIGATORIAS)].copy()
+    if "Cargo" in df.columns:
+        df["Cargo"] = df["Cargo"].replace(CARGOS_LEGADOS)
     for col in ("Vencimento_Basico", COLUNA_GRATIFICACAO, "Percentual_Motorista"):
         df[col] = df[col].astype(float)
     for col in ("Data_Inicio_Vigencia", "Data_Fim_Vigencia"):
@@ -751,6 +766,7 @@ def _validar_linha(
     """Valida e normaliza uma linha; retorna o registro ou ``None`` se houver erro."""
     erros_linha: list[str] = []
     cargo = _texto(linha["Cargo"])
+    cargo = CARGOS_LEGADOS.get(cargo, cargo)
     vinculo = normalizar_vinculo(_texto(linha["Vinculo"]))
     ch = normalizar_ch(_texto(linha["CH"]))
 

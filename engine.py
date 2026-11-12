@@ -36,8 +36,8 @@ def aliquota_patronal_vinculo(vinculo: str) -> Decimal:
     if str(vinculo).strip() == VINCULO_EFETIVO:
         return ALIQ_PATRONAL_EFETIVO
     return ALIQ_PATRONAL_TEMPORARIO
-CARGO_MOTORISTA = "Técnico Administrativo (Motorista)"
-CARGO_JORNALISTA = "Técnico de Nível Superior (Jornalista)"
+CARGO_MOTORISTA = "Motorista"
+CARGO_JORNALISTA = "Jornalista"
 LEI_JORNALISTA = "Lei 14.963/2025"
 CH_JORNALISTA = "25h"
 CHS_JORNALISTA: tuple[str, ...] = ("25h", "35h")
@@ -206,7 +206,7 @@ CATALOGO: tuple[CargoDef, ...] = (
         ("30h", "40h"), adicional=ROTULO_GRATIFICACAO,
     ),
     CargoDef(
-        CATEGORIA_TECNICOS, VINCULO_TEMPORARIO, CARGO_MOTORISTA, "Classe 1", ("30h", "40h"),
+        CATEGORIA_TECNICOS, VINCULO_TEMPORARIO, CARGO_MOTORISTA, "Classe 1", ("40h", "30h"),
         adicional="Percentual de incentivo (Percentual_Motorista). Não recebe gratificação",
     ),
 )

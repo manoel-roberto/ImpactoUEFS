@@ -196,7 +196,7 @@ def _parametros(res: ResultadoSimulacao, incluir_totais: bool) -> list[tuple[str
         itens.append(("Setor responsável", md["setor_descricao"], False))
     elif md.get("setor"):
         itens.append(("Setor responsável", md["setor"], False))
-    itens.append(("Gerado em", f"{_data_geracao(res):%d/%m/%Y %H:%M}", False))
+    itens.append(("Data/Hora:", f"{_data_geracao(res):%d/%m/%Y %H:%M}", False))
     return itens
 
 
@@ -242,18 +242,17 @@ def _criar_canvas(rodape: str) -> type[rl_canvas.Canvas]:
 
 
 def _formatar_rodape(res: ResultadoSimulacao, prefixo: str = "") -> str:
-    """Gera o texto do rodapé incluindo setor responsável e data/hora."""
+    """Gera o texto do rodapé com setor por extenso e data/hora de geração."""
     md = res.metadados
     gerado = _data_geracao(res)
     setor_sigla = str(md.get("setor") or engine.SETOR_PADRAO)
     setor_nome = md.get("setor_nome") or engine.SETORES.get(setor_sigla, "")
-    setor_info = f"{setor_sigla} - {setor_nome}" if setor_nome else setor_sigla
-    partes: list[str] = []
+    nome_setor = setor_nome if setor_nome else setor_sigla
+    texto = f"Fonte: {nome_setor} - Data/Hora: {gerado:%d/%m/%Y %H:%M}"
     if prefixo:
-        partes.append(prefixo)
-    partes.append(f"Setor: {setor_info}")
-    partes.append(f"gerado em {gerado:%d/%m/%Y %H:%M}")
-    return " – ".join(partes)
+        return f"{prefixo} – {texto}"
+    return texto
+
 
 
 def _estilos() -> dict[str, ParagraphStyle]:
@@ -688,7 +687,7 @@ def _tabela_parametros_sintetico(res: ResultadoSimulacao) -> Table:
     )
 
     dados = [
-        [Paragraph("<b>Parâmetros de cálculo</b>", estilo_titulo), "", "", ""],
+        [Paragraph("<b>PARÂMETROS DE CÁLCULO</b>", estilo_titulo), "", "", ""],
         [
             Paragraph("<b>Categoria:</b>", estilo_lbl), Paragraph(escape(categoria), estilo_val),
             Paragraph("<b>Vínculo:</b>", estilo_lbl), Paragraph(escape(vinculo), estilo_val),
@@ -777,7 +776,7 @@ def _tabelas_matriz_impacto_sintetico(res: ResultadoSimulacao) -> Table:
     eh_ano1_parcial = int(md.get("mes_ingresso", 1)) > 1
 
     col_ano1 = f"{ano1}*" if eh_ano1_parcial else str(ano1)
-    cabecalho2 = ["Composição", col_ano1, str(ano2), str(ano3), "Total (3 Anos)"]
+    cabecalho2 = ["COMPOSIÇÃO", col_ano1, str(ano2), str(ano3), "Total (3 Anos)"]
 
     aliq = float(md.get("aliquota_patronal", 0.20))
     aliq_pct = int(round(aliq * 100))

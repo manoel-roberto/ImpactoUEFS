@@ -238,7 +238,7 @@ def test_jornalista_25h_e_35h_aceitas() -> None:
     resultado = data_manager.validar_e_normalizar(df_invalido)
     assert not resultado.ok
     assert (
-        "Linha 2: CH '30h' inválida para 'Técnico de Nível Superior (Jornalista)'; "
+        "Linha 2: CH '30h' inválida para 'Jornalista'; "
         "permitida(s): 25h, 35h."
     ) in resultado.erros
 
@@ -248,7 +248,7 @@ def test_jornalista_25h_e_35h_aceitas() -> None:
              "01/01/2027", ""],
             [engine.CARGO_JORNALISTA, "Temporário", "35h", "1788,90", "2021,50", "",
              "01/01/2027", ""],
-            ["Técnico Administrativo (Motorista)", "Temporário", "40h", "1610,28", "0",
+            ["Motorista", "Temporário", "40h", "1610,28", "0",
              "96,96%", "01/04/2026", ""],
         ]
     )
@@ -283,7 +283,7 @@ def test_composicao_rbm_fecha(sim: Simulacao, linha: dict[str, Any]) -> None:
             componentes += item[engine.ROTULO_GRATIFICACAO]
         if "Incentivo" in item:
             componentes += item["Incentivo"]
-        if not sim.cargo.endswith("(Motorista)"):
+        if "Motorista" not in sim.cargo:
             assert round(componentes, 2) == round(item["RBM"], 2)
 
 
@@ -567,7 +567,7 @@ def test_base_inicial_csv_valida() -> None:
         assert res.ok, res.erros
         assert res.df is not None
         assert len(res.df) == 17
-        assert "Técnico Administrativo (Motorista)" in res.df["Cargo"].values
+        assert "Motorista" in res.df["Cargo"].values
         jornalistas = res.df[res.df["Cargo"] == engine.CARGO_JORNALISTA]
         assert set(jornalistas["CH"].values) == {"25h", "35h"}
 
@@ -684,7 +684,7 @@ def test_relatorio_pdf_sintetico_layout_uefs() -> None:
 
     # Verifica linhas da matriz sintética (Tabela 2)
     tabela2 = relatorios._tabelas_matriz_impacto_sintetico(res)
-    assert tabela2._cellvalues[0][0] == "Composição"
+    assert tabela2._cellvalues[0][0] == "COMPOSIÇÃO"
     assert tabela2._cellvalues[0][4] == "Total (3 Anos)"
     assert "Rendimento Básico Mensal" in tabela2._cellvalues[1][0].text
     assert "1 vaga" in tabela2._cellvalues[1][0].text
@@ -712,7 +712,7 @@ def test_relatorio_pdf_sintetico_layout_uefs() -> None:
     tabela_param = relatorios._tabela_parametros_sintetico(res)
     assert tabela_param is not None
     textos_param = [c.text for linha in tabela_param._cellvalues for c in linha if hasattr(c, "text")]
-    assert any("Parâmetros de cálculo" in t or "Parâmetros de calculo" in t for t in textos_param)
+    assert any("PARÂMETROS DE CÁLCULO" in t or "Parâmetros de cálculo" in t for t in textos_param)
     assert any("Categoria:" in t for t in textos_param)
     assert any("Vínculo:" in t for t in textos_param)
     assert any("Cargo Professor:" in t for t in textos_param)
@@ -981,7 +981,7 @@ def test_novas_regras_ferias_encargos_e_parametros_sintetico() -> None:
     tab_param = relatorios._tabela_parametros_sintetico(res)
     assert tab_param is not None
     textos = [c.text for linha in tab_param._cellvalues for c in linha if hasattr(c, "text")]
-    assert any("Parâmetros de cálculo" in t or "Parâmetros de calculo" in t for t in textos)
+    assert any("PARÂMETROS DE CÁLCULO" in t or "Parâmetros de cálculo" in t for t in textos)
     assert any("Categoria:" in t for t in textos)
     assert any("Vínculo:" in t for t in textos)
     assert any("Cargo Professor:" in t for t in textos)
@@ -1048,8 +1048,9 @@ def test_setores_opcoes_e_rodape() -> None:
         if shutil.which("pdftotext"):
             proc = subprocess.run(["pdftotext", "-", "-"], input=pdf_sintetico, capture_output=True, check=True)
             txt = proc.stdout.decode("utf-8")
-            assert sigla in txt
             assert engine.SETORES[sigla] in txt
+            assert "Fonte:" in txt
+            assert "Data/Hora:" in txt
 
         # Verifica nos parâmetros
         params = relatorios._parametros(res, incluir_totais=False)

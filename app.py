@@ -40,9 +40,22 @@ MIME_XLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 def _obter_base_ativa() -> pd.DataFrame | None:
     """Retorna a base salarial consolidada (da sessão ou carregando do SQLite)."""
     base: pd.DataFrame | None = st.session_state.get("base_salarial")
+    if base is not None and not base.empty and "Cargo" in base.columns:
+        nomes_legados = set(data_manager.CARGOS_LEGADOS.keys())
+        cargos_atuais = set(base["Cargo"].dropna().unique())
+        if any(c in nomes_legados for c in cargos_atuais):
+            base["Cargo"] = base["Cargo"].replace(data_manager.CARGOS_LEGADOS)
+            st.session_state["base_salarial"] = base
+
     if base is None or base.empty:
         try:
             base_db = data_manager.obter_base_completa()
+            if base_db.empty and data_manager.CAMINHO_BASE_INICIAL.exists():
+                df_ini = data_manager.carregar_arquivo(data_manager.CAMINHO_BASE_INICIAL)
+                res_ini = data_manager.validar_e_normalizar(df_ini)
+                if res_ini.ok and res_ini.df is not None:
+                    data_manager.salvar_base_sqlite(res_ini.df)
+                    base_db = data_manager.obter_base_completa()
             if not base_db.empty:
                 st.session_state["base_salarial"] = base_db
                 return base_db
