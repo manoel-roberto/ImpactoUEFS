@@ -1,0 +1,13 @@
+version: '3.8'
+
+services:
+  impactouefs:
+    build: .
+    container_name: impactouefs_app
+    ports:
+      - "8501:8501"
+    volumes:
+      - .:/app
+    restart: always
+    environment:
+      - PYTHONUNBUFFERED=1

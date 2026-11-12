@@ -79,6 +79,61 @@ A aplicação estará disponível em `http://localhost:8501`.
 
 ---
 
+## 🐳 Deploy e Execução com Docker
+
+A aplicação está containerizada e pronta para deploy em ambientes de desenvolvimento, homologação ou produção utilizando **Docker** e **Docker Compose**.
+
+### 1. Pré-requisitos
+* [Docker](https://docs.docker.com/get-docker/) instalado.
+* [Docker Compose](https://docs.docker.com/compose/) instalado (ou Docker CLI com suporte a Compose v2).
+
+### 2. Executando com Docker Compose (Recomendado)
+
+O arquivo `docker-compose.yml` está configurado para expor a porta `8501`, realizar a montagem de volume (garantindo a persistência do banco `db_salarios.sqlite`, pastas de logos e exportações) e reiniciar o container automaticamente:
+
+1. **Construir e iniciar o container em segundo plano:**
+   ```bash
+   docker compose up -d --build
+   ```
+
+2. **Acompanhar os logs da aplicação:**
+   ```bash
+   docker compose logs -f
+   ```
+
+3. **Verificar o status do container e healthcheck:**
+   ```bash
+   docker compose ps
+   ```
+
+4. **Parar a aplicação:**
+   ```bash
+   docker compose down
+   ```
+
+### 3. Executando com Docker CLI (Sem Compose)
+
+Se optar por executar diretamente via Docker:
+
+1. **Construir a imagem:**
+   ```bash
+   docker build -t impactouefs:latest .
+   ```
+
+2. **Executar o container com volume mapeado:**
+   ```bash
+   docker run -d \
+     --name impactouefs_app \
+     -p 8501:8501 \
+     -v "$(pwd)":/app \
+     --restart always \
+     impactouefs:latest
+   ```
+
+A aplicação estará disponível em `http://localhost:8501` (ou no IP do servidor de deploy).
+
+---
+
 ## 🧪 Executando os Testes Automatizados
 
 O projeto possui suíte de testes com cobertura para o motor de projeção, regras previdenciárias, validação de planilhas, persistência SQLite e relatórios PDF:
@@ -93,15 +148,18 @@ pytest
 
 ```text
 ImpactoUEFS/
-├── app.py              # Interface Streamlit (Simulação e Gestão da Base)
-├── data_manager.py     # Gestão da Base Salarial, Leitura, Validação e SQLite
-├── engine.py           # Motor de cálculo e projeção orçamentária
-├── relatorios.py       # Geradores de PDF (Sintético e Detalhado), Excel e CSV
-├── test_engine.py      # Testes automatizados (pytest)
-├── requirements.txt    # Dependências do projeto
-├── db_salarios.sqlite  # Banco de dados SQLite local
-├── logos/              # Logomarcas oficiais (UEFS, PGDP, UEFS 50 Anos)
-└── modelos/            # Templates modelo (.xlsx e .csv)
+├── app.py                 # Interface Streamlit (Simulação e Gestão da Base)
+├── data_manager.py        # Gestão da Base Salarial, Leitura, Validação e SQLite
+├── engine.py              # Motor de cálculo e projeção orçamentária
+├── relatorios.py          # Geradores de PDF (Sintético e Detalhado), Excel e CSV
+├── test_engine.py         # Testes automatizados (pytest)
+├── requirements.txt       # Dependências do projeto
+├── Dockerfile             # Definição da imagem de containerização
+├── docker-compose.yml     # Configuração e orquestração Docker Compose
+├── .dockerignore          # Arquivos excluídos do contexto de build Docker
+├── db_salarios.sqlite     # Banco de dados SQLite local
+├── logos/                 # Logomarcas oficiais (UEFS, PGDP, UEFS 50 Anos)
+└── modelos/               # Templates modelo (.xlsx e .csv)
 ```
 
 ---
@@ -111,3 +169,4 @@ ImpactoUEFS/
 **Universidade Estadual de Feira de Santana (UEFS)**  
 **Pró-Reitoria de Gestão e Desenvolvimento de Pessoas (PGDP)**  
 Feira de Santana – Bahia – Brasil
+
